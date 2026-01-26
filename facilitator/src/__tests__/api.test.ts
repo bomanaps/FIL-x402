@@ -1,6 +1,9 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll } from 'vitest';
 import { Hono } from 'hono';
 import { type Config, defaultConfig } from '../types/config.js';
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type AnyJson = any;
 import {
   LotusService,
   SignatureService,
@@ -94,7 +97,7 @@ describe('API Endpoints', () => {
   describe('GET /health', () => {
     it('should return healthy status', async () => {
       const res = await app.request('/health');
-      const body = await res.json();
+      const body = await res.json() as AnyJson;
 
       expect(res.status).toBe(200);
       expect(body.status).toBe('healthy');
@@ -116,7 +119,7 @@ describe('API Endpoints', () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ payment, requirements }),
       });
-      const body = await res.json();
+      const body = await res.json() as AnyJson;
 
       expect(res.status).toBe(200);
       expect(body.valid).toBe(true);
@@ -134,7 +137,7 @@ describe('API Endpoints', () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ payment, requirements }),
       });
-      const body = await res.json();
+      const body = await res.json() as AnyJson;
 
       expect(res.status).toBe(400);
       expect(body.valid).toBe(false);
@@ -150,7 +153,7 @@ describe('API Endpoints', () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ payment, requirements }),
       });
-      const body = await res.json();
+      const body = await res.json() as AnyJson;
 
       expect(res.status).toBe(400);
       expect(body.valid).toBe(false);
@@ -168,7 +171,7 @@ describe('API Endpoints', () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ payment, requirements }),
       });
-      const body = await res.json();
+      const body = await res.json() as AnyJson;
 
       expect(res.status).toBe(400);
       expect(body.valid).toBe(false);
@@ -186,7 +189,7 @@ describe('API Endpoints', () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ payment, requirements }),
       });
-      const body = await res.json();
+      const body = await res.json() as AnyJson;
 
       expect(res.status).toBe(400);
       expect(body.valid).toBe(false);
@@ -203,7 +206,7 @@ describe('API Endpoints', () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ payment, requirements }),
       });
-      const body = await res.json();
+      const body = await res.json() as AnyJson;
 
       expect(res.status).toBe(400);
       expect(body.valid).toBe(false);
@@ -220,7 +223,7 @@ describe('API Endpoints', () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ payment, requirements }),
       });
-      const body = await res.json();
+      const body = await res.json() as AnyJson;
 
       expect(res.status).toBe(400);
       expect(body.valid).toBe(false);
@@ -240,7 +243,7 @@ describe('API Endpoints', () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ payment, requirements }),
       });
-      const body = await res.json();
+      const body = await res.json() as AnyJson;
 
       expect(res.status).toBe(200);
       expect(body.success).toBe(true);
@@ -267,7 +270,7 @@ describe('API Endpoints', () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ payment, requirements }),
       });
-      const body = await res.json();
+      const body = await res.json() as AnyJson;
 
       expect(res.status).toBe(400);
       expect(body.success).toBe(false);

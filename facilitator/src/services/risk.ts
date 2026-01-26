@@ -1,5 +1,5 @@
 import type { Config } from '../types/config.js';
-import type { PaymentPayload, PendingSettlement, RiskLimits } from '../types/payment.js';
+import type { PaymentPayload, PaymentRequirements, PendingSettlement, RiskLimits } from '../types/payment.js';
 
 export interface RiskCheckResult {
   allowed: boolean;
@@ -114,7 +114,7 @@ export class RiskService {
    * Reserve credit for a pending payment
    * Called when a payment is verified and will be settled
    */
-  reserveCredit(paymentId: string, payment: PaymentPayload): void {
+  reserveCredit(paymentId: string, payment: PaymentPayload, requirements: PaymentRequirements): void {
     const wallet = payment.from.toLowerCase();
     const amount = BigInt(payment.value);
 
@@ -126,7 +126,7 @@ export class RiskService {
     this.pendingSettlements.set(paymentId, {
       paymentId,
       payment,
-      requirements: {} as any, // Will be filled by caller
+      requirements,
       status: 'pending',
       attempts: 0,
       maxAttempts: this.config.settlement.maxAttempts,

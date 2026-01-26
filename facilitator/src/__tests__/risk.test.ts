@@ -6,6 +6,7 @@ import {
   TEST_CHAIN_ID,
   createTestPayment,
   createOverLimitPayment,
+  createTestRequirements,
 } from './helpers.js';
 
 describe('RiskService', () => {
@@ -45,7 +46,7 @@ describe('RiskService', () => {
     it('should reject payment exceeding pending limit', async () => {
       // First, reserve some credit
       const payment1 = await createTestPayment({ value: '40000000' }); // $40
-      riskService.reserveCredit('payment1', payment1);
+      riskService.reserveCredit('payment1', payment1, createTestRequirements());
 
       // Try to add more that would exceed $50 pending
       const payment2 = await createTestPayment({ value: '20000000' }); // $20
@@ -59,7 +60,7 @@ describe('RiskService', () => {
       // Simulate completed payments: 5 x $100 = $500 (hits daily limit exactly)
       for (let i = 0; i < 5; i++) {
         const payment = await createTestPayment({ value: '100000000' }); // $100 (max per tx)
-        riskService.reserveCredit(`payment${i}`, payment);
+        riskService.reserveCredit(`payment${i}`, payment, createTestRequirements());
         riskService.releaseCredit(`payment${i}`, true); // Mark as successful
       }
 
@@ -75,7 +76,7 @@ describe('RiskService', () => {
   describe('reserveCredit / releaseCredit', () => {
     it('should track pending amount after reserve', async () => {
       const payment = await createTestPayment({ value: '10000000' }); // $10
-      riskService.reserveCredit('payment1', payment);
+      riskService.reserveCredit('payment1', payment, createTestRequirements());
 
       const pending = riskService.getPendingAmount(payment.from);
       expect(pending).toBe(10000000n);
@@ -83,7 +84,7 @@ describe('RiskService', () => {
 
     it('should clear pending and add to daily on successful release', async () => {
       const payment = await createTestPayment({ value: '10000000' }); // $10
-      riskService.reserveCredit('payment1', payment);
+      riskService.reserveCredit('payment1', payment, createTestRequirements());
       riskService.releaseCredit('payment1', true);
 
       const pending = riskService.getPendingAmount(payment.from);
@@ -95,7 +96,7 @@ describe('RiskService', () => {
 
     it('should clear pending without adding to daily on failed release', async () => {
       const payment = await createTestPayment({ value: '10000000' }); // $10
-      riskService.reserveCredit('payment1', payment);
+      riskService.reserveCredit('payment1', payment, createTestRequirements());
       riskService.releaseCredit('payment1', false);
 
       const pending = riskService.getPendingAmount(payment.from);
@@ -111,8 +112,8 @@ describe('RiskService', () => {
       const payment1 = await createTestPayment({ value: '10000000' });
       const payment2 = await createTestPayment({ value: '20000000' });
 
-      riskService.reserveCredit('p1', payment1);
-      riskService.reserveCredit('p2', payment2);
+      riskService.reserveCredit('p1', payment1, createTestRequirements());
+      riskService.reserveCredit('p2', payment2, createTestRequirements());
 
       const stats = riskService.getStats();
 

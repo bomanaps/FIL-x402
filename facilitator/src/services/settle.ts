@@ -67,13 +67,7 @@ export class SettleService {
     }
 
     // Reserve credit
-    this.risk.reserveCredit(paymentId, payment);
-
-    // Update settlement with requirements
-    this.risk.updatePendingSettlement(paymentId, {
-      requirements,
-      status: 'pending',
-    });
+    this.risk.reserveCredit(paymentId, payment, requirements);
 
     // Submit transaction to chain
     try {
