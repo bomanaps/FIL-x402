@@ -354,6 +354,166 @@ export class F3Service {
   }
 
   /**
+   * Derive which F3 instance covers a given tipset height.
+   * Uses certificates and current progress — no hardcoded epoch ratios.
+   */
+  async getInstanceForTipset(
+    tipsetHeight: number
+  ): Promise<{ instance: number; status: 'pending' | 'active' | 'finalized' }> {
+    // 1. Check if already finalized via latest certificate
+    const latestCert = await this.getLatestCertificate();
+    if (latestCert) {
+      const finalizedHeight = this.getMaxHeightFromCert(latestCert);
+      if (tipsetHeight <= finalizedHeight) {
+        return {
+          instance: latestCert.GPBFTInstance,
+          status: 'finalized',
+        };
+      }
+    }
+
+    // 2. Get current progress
+    let progress: F3Progress;
+    try {
+      progress = await this.getProgress();
+    } catch {
+      // Can't determine instance without progress
+      return { instance: 0, status: 'pending' };
+    }
+
+    // 3. Check if current instance already has a certificate covering this tipset
+    const currentCert = await this.getCertificate(progress.ID);
+    if (currentCert) {
+      const certHeight = this.getMaxHeightFromCert(currentCert);
+      if (tipsetHeight <= certHeight) {
+        return { instance: progress.ID, status: 'finalized' };
+      }
+    }
+
+    // 4. If the latest cert's instance is past the current progress instance,
+    //    the tipset must be finalized
+    if (latestCert && progress.ID <= latestCert.GPBFTInstance) {
+      // Walk forward from latest cert to find if a later cert covers it
+      // (the latest cert fetch above already checked this, so tipset is pending)
+    }
+
+    // 5. The tipset is not yet finalized. It will be covered by the next instance
+    //    after the current one (or the current one if it hasn't decided yet).
+    if (currentCert) {
+      // Current instance already decided, tipset is in the next one
+      return { instance: progress.ID + 1, status: 'pending' };
+    }
+
+    // Current instance hasn't decided yet — it may cover this tipset
+    return { instance: progress.ID, status: 'active' };
+  }
+
+  /**
+   * Extract the maximum epoch from a certificate's ECChain.
+   */
+  private getMaxHeightFromCert(cert: F3Certificate): number {
+    if (!cert.ECChain || cert.ECChain.length === 0) {
+      return 0;
+    }
+    return Math.max(...cert.ECChain.map((ts) => ts.Epoch));
+  }
+
+  /**
+   * Evaluate the confirmation level for a specific tipset height.
+   * This is the per-payment version of getConfirmationStatus().
+   */
+  async evaluateConfirmationForTipset(
+    tipsetHeight: number
+  ): Promise<ConfirmationStatus> {
+    if (!this.currentState) {
+      return {
+        level: ConfirmationLevel.L0_MEMPOOL,
+        timestamp: Date.now(),
+      };
+    }
+
+    // 1. Get instance mapping for this tipset
+    const mapping = await this.getInstanceForTipset(tipsetHeight);
+
+    // 2. Already finalized — L3
+    if (mapping.status === 'finalized') {
+      return {
+        level: ConfirmationLevel.L3_FINALIZED,
+        instance: mapping.instance,
+        certificateId: mapping.instance,
+        timestamp: Date.now(),
+      };
+    }
+
+    // 3. Instance is active — evaluate current phase
+    if (mapping.status === 'active' && this.currentState.instance === mapping.instance) {
+      return this.evaluateActiveInstance(this.currentState);
+    }
+
+    // 4. Instance is pending (hasn't started yet) — at best L1
+    return {
+      level: ConfirmationLevel.L1_INCLUDED,
+      instance: mapping.instance,
+      timestamp: Date.now(),
+    };
+  }
+
+  /**
+   * Evaluate the active instance and return a typed result
+   * with instance/round/phase fields populated.
+   */
+  private evaluateActiveInstance(
+    state: F3InstanceState
+  ): ConfirmationStatus {
+    const { instance, round, phase, phaseStartTime } = state;
+
+    // DECIDE or later = finalized
+    if (phase >= F3Phase.DECIDE) {
+      return {
+        level: ConfirmationLevel.L3_FINALIZED,
+        instance,
+        round,
+        phase,
+        timestamp: Date.now(),
+      };
+    }
+
+    // COMMIT = strong confidence → L2
+    if (phase === F3Phase.COMMIT) {
+      return {
+        level: ConfirmationLevel.L2_FCR_SAFE,
+        instance,
+        round,
+        phase,
+        timestamp: Date.now(),
+      };
+    }
+
+    // PREPARE + Round 0 + 5s buffer → L2
+    if (phase === F3Phase.PREPARE && round === 0) {
+      const timeInPhase = Date.now() - phaseStartTime;
+      if (timeInPhase >= this.SAFE_PREPARE_BUFFER_MS) {
+        return {
+          level: ConfirmationLevel.L2_FCR_SAFE,
+          instance,
+          round,
+          phase,
+          timestamp: Date.now(),
+        };
+      }
+    }
+
+    // Not yet safe → L1
+    return {
+      level: ConfirmationLevel.L1_INCLUDED,
+      instance,
+      round,
+      phase,
+      timestamp: Date.now(),
+    };
+  }
+
+  /**
    * Get current F3 state (for health checks)
    */
   getCurrentState(): F3InstanceState | null {

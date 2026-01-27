@@ -48,6 +48,15 @@ export function createSettleRoute(settleService: SettleService): Hono {
       createdAt: settlement.createdAt,
       updatedAt: settlement.updatedAt,
       error: settlement.error,
+      fcr: settlement.confirmationLevel
+        ? {
+            level: settlement.confirmationLevel,
+            instance: settlement.f3Instance,
+            round: settlement.f3Round,
+            phase: settlement.f3Phase,
+            confirmedAt: settlement.confirmedAt,
+          }
+        : undefined,
     });
   });
 
