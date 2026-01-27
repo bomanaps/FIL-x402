@@ -35,6 +35,7 @@ function loadConfig(): Config {
     token: {
       address: process.env.TOKEN_ADDRESS || defaultConfig.token.address,
       decimals: parseInt(process.env.TOKEN_DECIMALS || '6'),
+      name: process.env.TOKEN_NAME || defaultConfig.token.name,
     },
     chain: {
       id: parseInt(process.env.CHAIN_ID || '314159'),
@@ -79,11 +80,11 @@ function loadConfig(): Config {
 function createApp(config: Config) {
   // Initialize services
   const lotus = new LotusService(config);
-  const signature = new SignatureService(config);
+  const signature = new SignatureService(config, config.token.name);
   const risk = new RiskService(config);
   const verify = new VerifyService(config, lotus, signature, risk);
-  const settle = new SettleService(config, lotus, signature, risk, verify);
   const f3 = new F3Service(config);
+  const settle = new SettleService(config, lotus, signature, risk, verify, f3);
 
   // Create Hono app
   const app = new Hono();

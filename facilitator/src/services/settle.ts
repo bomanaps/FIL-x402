@@ -9,6 +9,7 @@ import { LotusService } from './lotus.js';
 import { SignatureService } from './signature.js';
 import { RiskService } from './risk.js';
 import { VerifyService } from './verify.js';
+import type { F3Service } from './f3.js';
 
 export class SettleService {
   private lotus: LotusService;
@@ -16,6 +17,7 @@ export class SettleService {
   private risk: RiskService;
   private verify: VerifyService;
   private config: Config;
+  private f3: F3Service | null;
 
   // Settlement worker state
   private isProcessing: boolean = false;
@@ -26,13 +28,15 @@ export class SettleService {
     lotus: LotusService,
     signature: SignatureService,
     risk: RiskService,
-    verify: VerifyService
+    verify: VerifyService,
+    f3?: F3Service
   ) {
     this.config = config;
     this.lotus = lotus;
     this.signature = signature;
     this.risk = risk;
     this.verify = verify;
+    this.f3 = f3 || null;
   }
 
   /**
@@ -81,17 +85,41 @@ export class SettleService {
         payment.signature
       );
 
-      // Update settlement with transaction CID
+      // Capture current block height as the tipset this payment targets
+      let tipsetHeight: number | undefined;
+      try {
+        tipsetHeight = await this.lotus.getBlockNumber();
+      } catch {
+        // Non-fatal: we just won't have per-payment FCR tracking
+      }
+
+      // Get initial FCR status for the response
+      let fcrData: SettleResponse['fcr'];
+      if (this.f3 && this.config.fcr.enabled && tipsetHeight !== undefined) {
+        const status = await this.f3.evaluateConfirmationForTipset(tipsetHeight);
+        fcrData = {
+          level: status.level,
+          instance: status.instance,
+          round: status.round,
+          phase: status.phase !== undefined ? status.phase.toString() : undefined,
+        };
+      }
+
+      // Update settlement with transaction CID and FCR state
       this.risk.updatePendingSettlement(paymentId, {
         transactionCid: txCid,
         status: 'submitted',
         attempts: 1,
+        tipsetHeight,
+        confirmationLevel: fcrData?.level,
+        f3Instance: fcrData?.instance,
       });
 
       return {
         success: true,
         paymentId,
         transactionCid: txCid,
+        fcr: fcrData,
       };
     } catch (error) {
       // Mark as retry for background processing
@@ -151,9 +179,48 @@ export class SettleService {
 
       for (const settlement of pending) {
         await this.processSettlement(settlement);
+        // Update FCR confirmation level for each pending settlement
+        await this.updateSettlementFCR(settlement);
       }
     } finally {
       this.isProcessing = false;
+    }
+  }
+
+  /**
+   * Update FCR confirmation level for a settlement.
+   * Called on each worker tick to track L0 → L1 → L2 → L3 progression.
+   */
+  private async updateSettlementFCR(settlement: PendingSettlement): Promise<void> {
+    if (!this.f3 || !this.config.fcr.enabled) return;
+    if (!settlement.tipsetHeight) return;
+    // Already finalized — nothing to update
+    if (settlement.confirmationLevel === 'L3') return;
+
+    try {
+      const status = await this.f3.evaluateConfirmationForTipset(settlement.tipsetHeight);
+
+      // Only update if the level has advanced
+      if (status.level !== settlement.confirmationLevel) {
+        const updates: Partial<PendingSettlement> = {
+          confirmationLevel: status.level,
+          f3Instance: status.instance,
+          f3Round: status.round,
+          f3Phase: status.phase,
+        };
+
+        if (status.level === 'L3') {
+          updates.confirmedAt = Date.now();
+        }
+
+        this.risk.updatePendingSettlement(settlement.paymentId, updates);
+        console.log(
+          `FCR update: payment=${settlement.paymentId} level=${status.level} instance=${status.instance}`
+        );
+      }
+    } catch (error) {
+      // Non-fatal: FCR tracking failure shouldn't block settlement processing
+      console.warn(`FCR tracking failed for ${settlement.paymentId}:`, error);
     }
   }
 

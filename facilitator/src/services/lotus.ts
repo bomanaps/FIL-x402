@@ -2,10 +2,11 @@ import type { Config } from '../types/config.js';
 import { ethers } from 'ethers';
 
 // ERC20 ABI for balance and authorization checks
+// NOTE: USDFC uses the v,r,s variant of transferWithAuthorization (EIP-3009 original)
 const ERC20_ABI = [
   'function balanceOf(address owner) view returns (uint256)',
   'function authorizationState(address authorizer, bytes32 nonce) view returns (bool)',
-  'function transferWithAuthorization(address from, address to, uint256 value, uint256 validAfter, uint256 validBefore, bytes32 nonce, bytes calldata signature)',
+  'function transferWithAuthorization(address from, address to, uint256 value, uint256 validAfter, uint256 validBefore, bytes32 nonce, uint8 v, bytes32 r, bytes32 s)',
 ];
 
 export class LotusService {
@@ -96,6 +97,9 @@ export class LotusService {
     const tokenWithSigner = this.tokenContract.connect(wallet) as ethers.Contract;
 
     try {
+      // Split signature into v, r, s (EIP-3009 original format)
+      const sig = ethers.Signature.from(signature);
+
       const tx = await tokenWithSigner.transferWithAuthorization(
         from,
         to,
@@ -103,7 +107,9 @@ export class LotusService {
         validAfter,
         validBefore,
         nonce,
-        signature
+        sig.v,
+        sig.r,
+        sig.s
       );
 
       // Return the transaction hash immediately (don't wait for confirmation)

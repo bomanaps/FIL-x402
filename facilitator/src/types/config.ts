@@ -17,6 +17,7 @@ export const ConfigSchema = z.object({
   token: z.object({
     address: z.string().regex(/^0x[a-fA-F0-9]{40}$/),
     decimals: z.number().default(6),
+    name: z.string().default('USD Coin'),
   }),
 
   // Chain configuration
@@ -73,6 +74,7 @@ export const defaultConfig: Config = {
     // USDFC on Calibration - placeholder, update with actual address
     address: '0x0000000000000000000000000000000000000000',
     decimals: 6,
+    name: 'USD Coin',
   },
   chain: {
     id: 314159,

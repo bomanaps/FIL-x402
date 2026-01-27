@@ -108,6 +108,7 @@ export interface PendingSettlement {
   updatedAt: number;
   error?: string;
   // FCR confirmation tracking
+  tipsetHeight?: number;
   confirmationLevel?: string;
   f3Instance?: number;
   f3Round?: number;
