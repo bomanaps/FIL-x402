@@ -12,15 +12,13 @@ export class VerifyService {
   private lotus: LotusService;
   private signature: SignatureService;
   private risk: RiskService;
-  private config: Config;
 
   constructor(
-    config: Config,
+    _config: Config,
     lotus: LotusService,
     signature: SignatureService,
     risk: RiskService
   ) {
-    this.config = config;
     this.lotus = lotus;
     this.signature = signature;
     this.risk = risk;

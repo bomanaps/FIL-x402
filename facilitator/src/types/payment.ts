@@ -71,6 +71,13 @@ export interface SettleResponse {
   transactionCid?: string;
   paymentId: string;
   error?: string;
+  // FCR confirmation info
+  fcr?: {
+    level: string;
+    instance?: number;
+    round?: number;
+    phase?: string;
+  };
 }
 
 // Risk limits configuration
@@ -100,4 +107,10 @@ export interface PendingSettlement {
   createdAt: number;
   updatedAt: number;
   error?: string;
+  // FCR confirmation tracking
+  confirmationLevel?: string;
+  f3Instance?: number;
+  f3Round?: number;
+  f3Phase?: number;
+  confirmedAt?: number;
 }

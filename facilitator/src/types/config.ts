@@ -39,6 +39,17 @@ export const ConfigSchema = z.object({
     timeoutMs: z.number().default(300000), // 5 minutes
   }),
 
+  // FCR (Fast Confirmation Rule) configuration
+  fcr: z.object({
+    enabled: z.boolean().default(true),
+    pollIntervalMs: z.number().default(1000),
+    // L2 safe heuristic settings
+    requireRoundZero: z.boolean().default(true),
+    minTimeInPrepareMs: z.number().default(5000), // 5s buffer
+    // Confirmation timeout
+    confirmationTimeoutMs: z.number().default(120000), // 2 minutes
+  }),
+
   // Facilitator wallet (for gas payments)
   facilitator: z.object({
     privateKey: z.string().optional(),
@@ -76,6 +87,13 @@ export const defaultConfig: Config = {
     maxAttempts: 3,
     retryDelayMs: 5000,
     timeoutMs: 300000,
+  },
+  fcr: {
+    enabled: true,
+    pollIntervalMs: 1000,
+    requireRoundZero: true,
+    minTimeInPrepareMs: 5000,
+    confirmationTimeoutMs: 120000,
   },
   facilitator: {
     privateKey: undefined,

@@ -29,13 +29,16 @@ Required environment variables:
 | `LOTUS_ENDPOINT` | Filecoin RPC endpoint |
 | `TOKEN_ADDRESS` | USDFC contract address |
 | `FACILITATOR_PRIVATE_KEY` | Wallet key for tx submission |
+| `FCR_ENABLED` | Enable F3 monitoring (default: true) |
 
 ## API
 
 ```
-POST /verify   - Verify payment before accepting
-POST /settle   - Submit payment to chain
-GET  /health   - Service status
+POST /verify      - Verify payment before accepting
+POST /settle      - Submit payment to chain
+GET  /health      - Service status
+GET  /fcr/status  - F3 consensus status
+GET  /fcr/levels  - Confirmation level definitions
 ```
 
 ## Docs

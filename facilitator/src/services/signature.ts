@@ -19,12 +19,9 @@ const TRANSFER_WITH_AUTHORIZATION_TYPEHASH = ethers.keccak256(
 );
 
 export class SignatureService {
-  private config: Config;
   private domainSeparator: string;
 
   constructor(config: Config, tokenName: string = 'USD Coin', tokenVersion: string = '1') {
-    this.config = config;
-
     // Compute EIP-712 domain separator
     const domain: EIP712Domain = {
       name: tokenName,
