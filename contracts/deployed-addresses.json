@@ -1,0 +1,9 @@
+{
+  "network": "calibration",
+  "chainId": 314159,
+  "token": "0xb3042734b608a1B16e9e86B374A3f3e389B4cDf0",
+  "bondedFacilitator": "0x0C79179E91246998A7F3b372de69ba2a112a37ed",
+  "deferredPaymentEscrow": "0x3EE8f61b928295492886C6509D591da132531ef3",
+  "deployer": "0x9c858D31D2bD776E4dDf658DaE2792Fa43CF52d9",
+  "deployedAt": "2026-01-27T12:47:02.564Z"
+}

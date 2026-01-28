@@ -589,3 +589,268 @@ Long-term:
 **Option B (IPC Subnet)**: True 1-2 second finality. Zero settlement risk. Filecoin-native scaling.
 
 Both paths work together: optimistic for frictionless onboarding, subnet for guaranteed finality.
+
+---
+
+## Implementation Roadmap
+
+### Stage 1: PoC (Complete)
+- Core x402 payment protocol
+- EIP-3009 `transferWithAuthorization` verification and settlement
+- Basic risk checks (balance, nonce, expiry)
+- `/verify` and `/settle` endpoints
+- Tested on Calibration with USDFC
+
+### Stage 2: FCR Integration (Complete)
+- F3/GossiPBFT finality monitoring
+- Confirmation levels L0 → L1 → L2 → L3
+- FCR-aware settlement decisions
+- `/fcr/status`, `/fcr/levels`, `/fcr/wait/:level` endpoints
+
+### Stage 3: Bond + Deferred Hybrid (Complete)
+- BondedFacilitator contract (collateral, commit/release/claim)
+- DeferredPaymentEscrow contract (deposit, thaw, EIP-712 vouchers, collect)
+- Tiered risk limits by wallet history (UNKNOWN → VERIFIED)
+- Fee calculation (base + risk + provider)
+- Provider policies by payment amount
+- Deployed to Calibration:
+  - BondedFacilitator: `0x0C79179E91246998A7F3b372de69ba2a112a37ed`
+  - DeferredPaymentEscrow: `0x3EE8f61b928295492886C6509D591da132531ef3`
+
+### Stage 4: Production Hardening (Planned)
+- Persistent storage (replace in-memory voucher store)
+- Key management and rotation
+- Rate limiting and DDoS protection
+- Monitoring, alerting, and dashboards
+- Security audit
+- Mainnet deployment
+
+### Stage 5: EIP-8004 Trustless Agents Integration (Planned)
+
+EIP-8004 defines three on-chain registries for autonomous agent discovery and trust. It explicitly supports x402 payments. Integrating this standard positions us as the payment layer for the AI agent economy.
+
+#### Why EIP-8004
+
+| Problem Today | EIP-8004 Solution |
+|---------------|-------------------|
+| Providers must be known upfront | Identity Registry enables discovery |
+| Risk tiers are time-based only | Reputation Registry enables trust-based tiers |
+| No proof of delivery | Validation Registry provides on-chain attestations |
+| No standard for agent-to-agent payments | x402 + EIP-8004 = complete stack |
+
+#### Integration Points
+
+**1. Identity Registry (Provider Discovery)**
+```
+Providers register as agents:
+  - x402Support: true
+  - facilitatorUrl: "https://facilitator.example.com"
+  - endpoints: { api: "https://api.example.com" }
+
+Buyers query registry to discover x402-enabled providers
+```
+
+**2. Reputation Registry (Trust-Based Risk)**
+```
+After settlement:
+  facilitator.giveFeedback(agentId, {
+    value: 1,  // positive
+    tag1: "payment_settled",
+    proofOfPayment: { fromAddress, toAddress, chainId, txHash }
+  })
+
+During risk check:
+  reputation = reputationRegistry.getSummary(buyerAgentId)
+  tier = reputation.positiveCount > 50 ? VERIFIED : calculateFromHistory()
+```
+
+**3. Validation Registry (Delivery Attestation)**
+```
+After service delivery:
+  provider.validationRequest(paymentId, facilitatorAddress)
+
+Facilitator attests:
+  facilitator.validationResponse(paymentId, {
+    score: 100,  // payment settled successfully
+    evidenceUri: "ipfs://Qm..."
+  })
+```
+
+#### Implementation Steps
+
+1. **Deploy Identity Registry** (or use existing deployment)
+   - Register facilitator as an agent
+   - Define x402 provider registration schema
+
+2. **Integrate Reputation Registry**
+   - Call `giveFeedback()` after each successful settlement
+   - Include `proofOfPayment` with transaction details
+   - Query reputation in `RiskService.getWalletTier()`
+
+3. **Integrate Validation Registry**
+   - Facilitator becomes a validator
+   - Attest to payment settlements via `validationResponse()`
+   - Providers can request validation for delivery proof
+
+4. **Provider Discovery Endpoint**
+   - `GET /discover` — query Identity Registry for x402 providers
+   - Filter by reputation, validation scores, supported tokens
+
+5. **Agent Registration Helper**
+   - `POST /register` — helper to register providers in Identity Registry
+   - Auto-populate x402Support and facilitator endpoint
+
+#### New Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/discover` | GET | Query Identity Registry for x402-enabled providers |
+| `/register` | POST | Register a provider in Identity Registry |
+| `/reputation/:agentId` | GET | Get reputation summary for an agent |
+| `/validate/:paymentId` | POST | Request/submit validation attestation |
+
+#### New Services
+
+```
+facilitator/src/services/
+  eip8004/
+    identity.ts      — Identity Registry interaction
+    reputation.ts    — Reputation Registry interaction
+    validation.ts    — Validation Registry interaction
+    discovery.ts     — Provider discovery logic
+```
+
+#### Benefits
+
+- **Discoverability**: Providers found on-chain, no manual coordination
+- **Smarter Risk**: Reputation replaces time-based tier progression
+- **Audit Trail**: On-chain proof of payments and delivery
+- **Interoperability**: Standard interface for any agent protocol (MCP, A2A, OASF)
+- **AI Agent Economy**: Position as the payment infrastructure for autonomous agents
+
+#### Dependencies
+
+- EIP-8004 registry contracts deployed (or deploy our own)
+- IPFS/Arweave for off-chain registration files
+- May require subgraph for efficient registry queries
+
+### Stage 6: Ecosystem Integration & Go-to-Market (Planned)
+
+Position FIL-x402 as THE Filecoin x402 facilitator and acquire users through strategic partnerships.
+
+#### Market Context
+
+x402 is exploding (930K weekly transactions, $10M+ volume) but Coinbase's facilitator only supports Base and Solana. **Filecoin has no x402 facilitator** — that's our gap.
+
+Secured Finance is the DeFi backbone on Filecoin:
+- USDFC stablecoin (110% FIL-collateralized, live on mainnet)
+- Fixed-rate lending markets
+- 24 hackathon projects built on their stack
+- Backed by Consensys, Protocol Labs, Huobi, GSR
+
+**They have the users and the money. We have the payment rails.**
+
+#### Partnership Strategy
+
+**1. Secured Finance Partnership**
+
+| What we offer | What we get |
+|---------------|-------------|
+| x402 payment flow for USDFC | Access to their user base |
+| Bond-backed settlement | Co-marketing (blogs, docs) |
+| FCR finality tracking | Protocol Labs grant potential |
+| Deferred escrow for recurring payments | Integration into their dApps |
+
+Integration phases:
+
+- **Phase 1: USDFC Payment Widget** — Embeddable "Pay with USDFC" button that signs EIP-3009, verifies via our facilitator, settles on-chain. Target: their lending dApp, third-party USDFC apps.
+
+- **Phase 2: Lending Market Integration** — Providers deposit USDFC in Secured Finance lending market, earn fixed yield while waiting for payments. Our facilitator pulls from their balance when settlements occur. Result: yield-bearing escrow.
+
+- **Phase 3: Storage Deal Financing** — Buyers borrow USDFC from Secured Finance, deposit into our escrow, pay storage providers via deferred vouchers. Result: storage deals become financeable.
+
+**2. x402 Foundation Membership**
+
+- Apply for membership (Coinbase, Cloudflare are founding members)
+- Get listed as the official Filecoin facilitator
+- Contribute Filecoin-specific extensions to the spec
+- Access to ecosystem partnerships and grants
+
+**3. Filecoin Storage Provider Onboarding**
+
+Current pain points:
+- Manual invoicing for storage deals
+- 5+ minute finality wait
+- No micropayment support
+
+Our solution:
+- Instant payment verification
+- Pay-per-request storage APIs
+- Deferred vouchers for ongoing deals
+
+Target: top 50 storage providers on Filecoin.
+
+**4. AI Agent Developer Outreach**
+
+AI agents need Filecoin for:
+- Decentralized storage (training data, model weights)
+- Payment rails without human approval
+- Micropayments for per-inference billing
+
+We're the only x402 facilitator on Filecoin. With EIP-8004 (Stage 5), agents can discover us on-chain.
+
+Target channels:
+- Filecoin hackathons and grants
+- AI agent frameworks (AutoGPT, LangChain, CrewAI)
+- Protocol Labs developer relations
+
+#### Deliverables
+
+| Deliverable | Description |
+|-------------|-------------|
+| Partnership proposal doc | One-pager for Secured Finance pitch |
+| USDFC payment widget | Embeddable JS component + demo |
+| Storage provider SDK | Simplified integration for SPs |
+| x402 Foundation application | Membership request + contribution plan |
+| Developer documentation | Guides for AI agent builders |
+| Marketing site | Landing page at fil-x402.org or similar |
+
+#### Success Metrics
+
+| Metric | 3-month target | 6-month target |
+|--------|----------------|----------------|
+| Active providers | 10 | 50 |
+| Monthly transaction volume | $10K | $100K |
+| Weekly transactions | 1,000 | 10,000 |
+| Storage providers integrated | 5 | 20 |
+| AI agent integrations | 3 | 15 |
+
+#### Go-to-Market Timeline
+
+```
+Month 1:
+  - Secured Finance partnership outreach
+  - x402 Foundation application
+  - Payment widget MVP
+
+Month 2:
+  - Secured Finance integration (Phase 1)
+  - Storage provider pilot (5 SPs)
+  - Developer docs + guides
+
+Month 3:
+  - AI agent SDK release
+  - Filecoin hackathon sponsorship
+  - First 10 paying customers
+
+Month 4-6:
+  - Secured Finance Phase 2 (lending integration)
+  - Scale to 50 providers
+  - Protocol Labs grant application
+```
+
+---
+
+## Option B: IPC Subnet (Future)
+
+After Option A is production-ready, explore IPC subnet for true instant finality. See [IPC Payment Subnet](#option-b-ipc-payment-subnet) section above.

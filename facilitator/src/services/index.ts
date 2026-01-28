@@ -4,3 +4,7 @@ export { RiskService } from './risk.js';
 export { VerifyService } from './verify.js';
 export { SettleService } from './settle.js';
 export { F3Service } from './f3.js';
+export { BondService } from './bond.js';
+export { DeferredService } from './deferred.js';
+export { FeeService } from './fee.js';
+export { PolicyService } from './policy.js';

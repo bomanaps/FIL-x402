@@ -69,7 +69,7 @@ describe('API Endpoints', () => {
   beforeAll(() => {
     config = {
       ...defaultConfig,
-      token: { address: TEST_TOKEN, decimals: 6 },
+      token: { address: TEST_TOKEN, decimals: 6, name: 'USD Coin' },
       chain: { id: TEST_CHAIN_ID, name: 'calibration' },
       risk: {
         maxPerTransaction: 100,

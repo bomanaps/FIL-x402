@@ -13,7 +13,7 @@ describe('RiskService', () => {
   let riskService: RiskService;
   const config = {
     ...defaultConfig,
-    token: { address: TEST_TOKEN, decimals: 6 },
+    token: { address: TEST_TOKEN, decimals: 6, name: 'USD Coin' },
     chain: { id: TEST_CHAIN_ID, name: 'calibration' },
     risk: {
       maxPerTransaction: 100, // $100
@@ -69,7 +69,7 @@ describe('RiskService', () => {
       const result = riskService.checkPayment(newPayment);
 
       expect(result.allowed).toBe(false);
-      expect(result.reason).toContain('daily limit');
+      expect(result.reason).toContain('tier limit');
     });
   });
 
