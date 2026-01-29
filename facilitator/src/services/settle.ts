@@ -10,6 +10,7 @@ import { SignatureService } from './signature.js';
 import { RiskService } from './risk.js';
 import { VerifyService } from './verify.js';
 import type { F3Service } from './f3.js';
+import type { BondService } from './bond.js';
 
 export class SettleService {
   private lotus: LotusService;
@@ -18,6 +19,7 @@ export class SettleService {
   private verify: VerifyService;
   private config: Config;
   private f3: F3Service | null;
+  private bond: BondService | null;
 
   // Settlement worker state
   private isProcessing: boolean = false;
@@ -29,7 +31,8 @@ export class SettleService {
     signature: SignatureService,
     risk: RiskService,
     verify: VerifyService,
-    f3?: F3Service
+    f3?: F3Service,
+    bond?: BondService
   ) {
     this.config = config;
     this.lotus = lotus;
@@ -37,6 +40,7 @@ export class SettleService {
     this.risk = risk;
     this.verify = verify;
     this.f3 = f3 || null;
+    this.bond = bond || null;
   }
 
   /**
@@ -72,6 +76,27 @@ export class SettleService {
 
     // Reserve credit
     this.risk.reserveCredit(paymentId, payment, requirements);
+
+    // Commit bond if bond service is available
+    if (this.bond) {
+      try {
+        const hasCapacity = await this.bond.hasCapacity(BigInt(payment.value));
+        if (!hasCapacity) {
+          return {
+            success: false,
+            paymentId,
+            error: 'insufficient_bond_capacity',
+          };
+        }
+        await this.bond.commitPayment(paymentId, requirements.payTo, BigInt(payment.value));
+      } catch (error) {
+        return {
+          success: false,
+          paymentId,
+          error: `bond_commit_failed: ${error}`,
+        };
+      }
+    }
 
     // Submit transaction to chain
     try {
@@ -236,7 +261,14 @@ export class SettleService {
         const receipt = await this.lotus.waitForTransaction(transactionCid, 1);
 
         if (receipt && receipt.status === 1) {
-          // Success!
+          // Success! Release bond and credit
+          if (this.bond) {
+            try {
+              await this.bond.releasePayment(paymentId);
+            } catch (bondErr) {
+              console.warn(`Bond release failed for ${paymentId}:`, bondErr);
+            }
+          }
           this.risk.releaseCredit(paymentId, true);
           console.log(`Settlement ${paymentId} confirmed: ${transactionCid}`);
           return;
