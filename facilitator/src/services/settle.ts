@@ -200,11 +200,15 @@ export class SettleService {
     this.isProcessing = true;
 
     try {
+      // Process settlements waiting for on-chain confirmation
       const pending = this.risk.getAllPendingSettlements();
-
       for (const settlement of pending) {
         await this.processSettlement(settlement);
-        // Update FCR confirmation level for each pending settlement
+      }
+
+      // Update FCR for all settlements not yet at L3 (including confirmed ones)
+      const needsFCR = this.risk.getSettlementsNeedingFCR();
+      for (const settlement of needsFCR) {
         await this.updateSettlementFCR(settlement);
       }
     } finally {
@@ -223,7 +227,10 @@ export class SettleService {
     if (settlement.confirmationLevel === 'L3') return;
 
     try {
-      const status = await this.f3.evaluateConfirmationForTipset(settlement.tipsetHeight);
+      const status = await this.f3.evaluateConfirmationForTipset(
+        settlement.tipsetHeight,
+        settlement.createdAt
+      );
 
       // Only update if the level has advanced
       if (status.level !== settlement.confirmationLevel) {
