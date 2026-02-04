@@ -50,7 +50,7 @@ Deployed and tested on Filecoin Calibration testnet with USDFC.
 - Node.js 20+
 - A wallet with Filecoin Calibration testnet tokens:
   - **tFIL** (gas) from https://faucet.calibnet.chainsafe-fil.io
-  - **USDFC** test tokens
+  - **USDFC** test tokens from https://forest-explorer.chainsafe.dev/faucet/calibnet_usdfc
 - The wallet's private key
 
 ## Quick Start
@@ -154,7 +154,20 @@ This tests on-chain contract operations:
 2. Escrow: deposit -> sign voucher -> collect
 3. API: server health and deferred buyer endpoint
 
-### 7. Run the test suite
+### 7. Run the demo frontend
+
+```bash
+# In a new terminal
+npm install --prefix demo
+npm run dev --prefix demo
+```
+
+Open http://localhost:3000 to see:
+- **Buyer page** — Connect wallet, sign payments, watch FCR L0→L3 progression
+- **Provider page** — Integration guide and code examples
+- **Dashboard** — Real-time facilitator monitoring
+
+### 8. Run the test suite
 
 ```bash
 # Contract tests (33 tests)
@@ -287,6 +300,14 @@ Filecoin's Fast Confirmation Rule using F3/GossiPBFT consensus:
 
 ```
 FIL-x402/
+  demo/                               Next.js demo frontend
+    src/app/
+      buyer/page.tsx                  Payment signing + FCR tracking
+      provider/page.tsx               Integration guide
+      dashboard/page.tsx              Facilitator monitoring
+    src/lib/
+      config.ts                       Chain/contract configuration
+      facilitator.ts                  API client
   contracts/                          Hardhat project (Solidity)
     contracts/
       BondedFacilitator.sol           Bond collateral contract
@@ -330,7 +351,7 @@ FIL-x402/
 
 ## Known Limitations
 
-- **F3 monitoring requires a full Lotus node.** Public RPCs (Glif, Ankr) do not expose `F3GetManifest` / `F3GetProgress`. Without a Lotus node with F3 enabled, FCR stays at L0. The facilitator still works for payment submission and verification.
+- **F3 is not active on Calibration testnet.** Public RPCs return stale F3 certificates (~23 days behind). The facilitator uses time-based heuristics as a fallback: L1 immediate, L2 at 30s, L3 at 60s. On mainnet, real F3 tracking works via `F3GetLatestCertificate`.
 - **USDFC contract uses v,r,s signature format.** The EIP-3009 `transferWithAuthorization` on Calibration uses `(address,address,uint256,uint256,uint256,bytes32,uint8,bytes32,bytes32)`, not the `bytes signature` variant. This is handled automatically.
 - **In-memory voucher store.** Stored vouchers are lost on server restart. A persistent database would be needed for production.
 - **Single facilitator wallet.** All settlements and bond operations use one private key. Production would need key management and rotation.

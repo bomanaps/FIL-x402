@@ -269,6 +269,14 @@ export class RiskService {
   }
 
   /**
+   * Get all settlements that need FCR tracking (not yet L3 finalized)
+   */
+  getSettlementsNeedingFCR(): PendingSettlement[] {
+    return Array.from(this.pendingSettlements.values())
+      .filter(s => s.confirmationLevel !== 'L3' && s.tipsetHeight !== undefined);
+  }
+
+  /**
    * Get risk limits for display
    */
   getLimits(): RiskLimits {
@@ -284,14 +292,16 @@ export class RiskService {
     walletsWithPending: number;
   } {
     let totalPendingAmount = 0n;
+    let walletsWithPending = 0;
     for (const amount of this.pendingByWallet.values()) {
       totalPendingAmount += amount;
+      if (amount > 0n) walletsWithPending++;
     }
 
     return {
       totalPendingSettlements: this.getAllPendingSettlements().length,
       totalPendingAmount,
-      walletsWithPending: this.pendingByWallet.size,
+      walletsWithPending,
     };
   }
 }
