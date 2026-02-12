@@ -126,7 +126,7 @@ export class VerifyService {
     }
 
     // 8. Check risk limits
-    const riskCheck = this.risk.checkPayment(payment);
+    const riskCheck = await this.risk.checkPayment(payment);
     if (!riskCheck.allowed) {
       return {
         valid: false,

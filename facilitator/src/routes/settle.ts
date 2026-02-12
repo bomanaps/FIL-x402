@@ -34,7 +34,7 @@ export function createSettleRoute(settleService: SettleService): Hono {
   app.get('/:paymentId', async (c) => {
     const paymentId = c.req.param('paymentId');
 
-    const settlement = settleService.getSettlementStatus(paymentId);
+    const settlement = await settleService.getSettlementStatus(paymentId);
 
     if (!settlement) {
       return c.json({ error: 'settlement_not_found' }, 404);

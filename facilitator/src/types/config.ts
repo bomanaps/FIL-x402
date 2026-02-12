@@ -7,6 +7,19 @@ export const ConfigSchema = z.object({
     host: z.string().default('0.0.0.0'),
   }),
 
+  // Redis configuration (optional - falls back to in-memory if not provided)
+  redis: z.object({
+    enabled: z.boolean().default(false),
+    host: z.string().default('localhost'),
+    port: z.number().default(6379),
+    password: z.string().optional(),
+    db: z.number().default(0),
+    keyPrefix: z.string().default('fcr-x402:'),
+    // Connection pool settings
+    maxRetries: z.number().default(3),
+    retryDelayMs: z.number().default(1000),
+  }).default({}),
+
   // Lotus node configuration
   lotus: z.object({
     endpoint: z.string().url(),
@@ -65,6 +78,16 @@ export const defaultConfig: Config = {
   server: {
     port: 3402,
     host: '0.0.0.0',
+  },
+  redis: {
+    enabled: false,
+    host: 'localhost',
+    port: 6379,
+    password: undefined,
+    db: 0,
+    keyPrefix: 'fcr-x402:',
+    maxRetries: 3,
+    retryDelayMs: 1000,
   },
   lotus: {
     endpoint: 'http://localhost:1234/rpc/v1',

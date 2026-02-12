@@ -12,7 +12,7 @@ export function createHealthRoute(
 
   app.get('/', async (c) => {
     const lotusHealthy = await lotus.healthCheck();
-    const riskStats = risk.getStats();
+    const riskStats = await risk.getStats();
     const limits = risk.getLimits();
 
     const healthy = lotusHealthy;
@@ -25,6 +25,9 @@ export function createHealthRoute(
           id: config.chain.id,
           name: config.chain.name,
           connected: lotusHealthy,
+        },
+        storage: {
+          redis: riskStats.redisEnabled,
         },
         settlements: {
           pending: riskStats.totalPendingSettlements,

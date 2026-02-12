@@ -54,7 +54,7 @@ export class SettleService {
     const paymentId = this.signature.generatePaymentId(payment);
 
     // Check if already being processed
-    const existing = this.risk.getPendingSettlement(paymentId);
+    const existing = await this.risk.getPendingSettlement(paymentId);
     if (existing) {
       return {
         success: false,
@@ -75,7 +75,7 @@ export class SettleService {
     }
 
     // Reserve credit
-    this.risk.reserveCredit(paymentId, payment, requirements);
+    await this.risk.reserveCredit(paymentId, payment, requirements);
 
     // Commit bond if bond service is available
     if (this.bond) {
@@ -131,7 +131,7 @@ export class SettleService {
       }
 
       // Update settlement with transaction CID and FCR state
-      this.risk.updatePendingSettlement(paymentId, {
+      await this.risk.updatePendingSettlement(paymentId, {
         transactionCid: txCid,
         status: 'submitted',
         attempts: 1,
@@ -148,7 +148,7 @@ export class SettleService {
       };
     } catch (error) {
       // Mark as retry for background processing
-      this.risk.updatePendingSettlement(paymentId, {
+      await this.risk.updatePendingSettlement(paymentId, {
         status: 'retry',
         attempts: 1,
         error: String(error),
@@ -201,13 +201,13 @@ export class SettleService {
 
     try {
       // Process settlements waiting for on-chain confirmation
-      const pending = this.risk.getAllPendingSettlements();
+      const pending = await this.risk.getAllPendingSettlements();
       for (const settlement of pending) {
         await this.processSettlement(settlement);
       }
 
       // Update FCR for all settlements not yet at L3 (including confirmed ones)
-      const needsFCR = this.risk.getSettlementsNeedingFCR();
+      const needsFCR = await this.risk.getSettlementsNeedingFCR();
       for (const settlement of needsFCR) {
         await this.updateSettlementFCR(settlement);
       }
@@ -245,7 +245,7 @@ export class SettleService {
           updates.confirmedAt = Date.now();
         }
 
-        this.risk.updatePendingSettlement(settlement.paymentId, updates);
+        await this.risk.updatePendingSettlement(settlement.paymentId, updates);
         console.log(
           `FCR update: payment=${settlement.paymentId} level=${status.level} instance=${status.instance}`
         );
@@ -276,12 +276,12 @@ export class SettleService {
               console.warn(`Bond release failed for ${paymentId}:`, bondErr);
             }
           }
-          this.risk.releaseCredit(paymentId, true);
+          await this.risk.releaseCredit(paymentId, true);
           console.log(`Settlement ${paymentId} confirmed: ${transactionCid}`);
           return;
         } else if (receipt && receipt.status === 0) {
           // Transaction failed on-chain
-          this.risk.updatePendingSettlement(paymentId, {
+          await this.risk.updatePendingSettlement(paymentId, {
             status: 'retry',
             error: 'transaction_reverted',
           });
@@ -297,7 +297,7 @@ export class SettleService {
     if (status === 'retry') {
       if (attempts >= maxAttempts) {
         // Max retries reached - mark as failed
-        this.risk.releaseCredit(paymentId, false);
+        await this.risk.releaseCredit(paymentId, false);
         console.error(`Settlement ${paymentId} failed after ${attempts} attempts`);
         return;
       }
@@ -305,7 +305,7 @@ export class SettleService {
       // Check if payment expired
       const now = Math.floor(Date.now() / 1000);
       if (now >= payment.validBefore) {
-        this.risk.releaseCredit(paymentId, false);
+        await this.risk.releaseCredit(paymentId, false);
         console.error(`Settlement ${paymentId} expired`);
         return;
       }
@@ -322,7 +322,7 @@ export class SettleService {
           payment.signature
         );
 
-        this.risk.updatePendingSettlement(paymentId, {
+        await this.risk.updatePendingSettlement(paymentId, {
           transactionCid: txCid,
           status: 'submitted',
           attempts: attempts + 1,
@@ -330,7 +330,7 @@ export class SettleService {
 
         console.log(`Settlement ${paymentId} retry ${attempts + 1} submitted: ${txCid}`);
       } catch (error) {
-        this.risk.updatePendingSettlement(paymentId, {
+        await this.risk.updatePendingSettlement(paymentId, {
           attempts: attempts + 1,
           error: String(error),
         });
@@ -342,7 +342,7 @@ export class SettleService {
   /**
    * Get settlement status
    */
-  getSettlementStatus(paymentId: string): PendingSettlement | undefined {
+  async getSettlementStatus(paymentId: string): Promise<PendingSettlement | undefined> {
     return this.risk.getPendingSettlement(paymentId);
   }
 }
