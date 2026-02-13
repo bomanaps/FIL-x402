@@ -1,5 +1,6 @@
 import type { Config } from '../types/config.js';
 import type { PaymentPayload, PaymentRequirements, PendingSettlement, RiskLimits } from '../types/payment.js';
+import { RedisService, REDIS_KEYS } from './redis.js';
 
 export interface RiskCheckResult {
   allowed: boolean;
@@ -10,44 +11,60 @@ export interface RiskCheckResult {
   walletTier?: WalletTier;
 }
 
-/**
- * Wallet risk tiers — daily limits increase with history.
- */
 export enum WalletTier {
-  UNKNOWN = 'UNKNOWN',         // No history: $5/day
-  HISTORY_7D = 'HISTORY_7D',   // 7+ days of activity: $50/day
-  HISTORY_30D = 'HISTORY_30D', // 30+ days of activity: $500/day
-  VERIFIED = 'VERIFIED',       // Manually verified: $5,000/day
+  UNKNOWN = 'UNKNOWN',
+  HISTORY_7D = 'HISTORY_7D',
+  HISTORY_30D = 'HISTORY_30D',
+  VERIFIED = 'VERIFIED',
 }
 
-const TIER_DAILY_LIMITS_USD: Record<WalletTier, number> = {
+const TIER_LIMITS_USD: Record<WalletTier, number> = {
   [WalletTier.UNKNOWN]: 5,
   [WalletTier.HISTORY_7D]: 50,
   [WalletTier.HISTORY_30D]: 500,
   [WalletTier.VERIFIED]: 5000,
 };
 
-/**
- * In-memory risk tracking service
- * For production, replace with Redis-backed implementation
- */
+const DAILY_USAGE_TTL = 25 * 60 * 60; // 25 hours
+const SETTLEMENT_TTL = 24 * 60 * 60;  // 24 hours
+
+interface StoredSettlement {
+  paymentId: string;
+  payment: Omit<PaymentPayload, 'value'> & { value: string };
+  requirements: PaymentRequirements;
+  status: string;
+  attempts: number;
+  maxAttempts: number;
+  createdAt: number;
+  updatedAt: number;
+  transactionCid?: string;
+  error?: string;
+  tipsetHeight?: number;
+  confirmationLevel?: string;
+  f3Instance?: number;
+  f3Round?: number;
+  f3Phase?: number;
+  confirmedAt?: number;
+}
+
 export class RiskService {
   private config: Config;
   private limits: RiskLimits;
+  private redis: RedisService | null;
 
-  // In-memory tracking (replace with Redis for production)
-  private pendingByWallet: Map<string, bigint> = new Map();
-  private dailyUsageByWallet: Map<string, { amount: bigint; date: string }> = new Map();
-  private pendingSettlements: Map<string, PendingSettlement> = new Map();
+  // In-memory storage (used when Redis unavailable)
+  private memory = {
+    pending: new Map<string, bigint>(),
+    daily: new Map<string, { amount: bigint; date: string }>(),
+    settlements: new Map<string, PendingSettlement>(),
+    tiers: new Map<string, WalletTier>(),
+    firstSeen: new Map<string, number>(),
+  };
 
-  // Wallet tier tracking
-  private walletTiers: Map<string, WalletTier> = new Map();
-  private walletFirstSeen: Map<string, number> = new Map();
-
-  constructor(config: Config) {
+  constructor(config: Config, redis?: RedisService) {
     this.config = config;
+    this.redis = redis ?? null;
 
-    // Convert USD limits to token units
     const decimals = BigInt(10 ** config.token.decimals);
     this.limits = {
       maxPerTransaction: BigInt(config.risk.maxPerTransaction) * decimals,
@@ -56,123 +73,128 @@ export class RiskService {
     };
   }
 
-  /**
-   * Get current date string for daily limit tracking
-   */
-  private getDateKey(): string {
+  private useRedis(): boolean {
+    return this.redis?.isAvailable() ?? false;
+  }
+
+  private today(): string {
     return new Date().toISOString().split('T')[0];
   }
 
-  /**
-   * Get pending amount for a wallet
-   */
-  getPendingAmount(wallet: string): bigint {
-    return this.pendingByWallet.get(wallet.toLowerCase()) || 0n;
-  }
-
-  /**
-   * Get daily usage for a wallet
-   */
-  getDailyUsage(wallet: string): bigint {
-    const usage = this.dailyUsageByWallet.get(wallet.toLowerCase());
-    if (!usage || usage.date !== this.getDateKey()) {
-      return 0n;
-    }
-    return usage.amount;
-  }
-
-  /**
-   * Get the risk tier for a wallet, auto-upgrading based on history.
-   */
-  getWalletTier(wallet: string): WalletTier {
-    const key = wallet.toLowerCase();
-
-    // Check for manual override
-    const manual = this.walletTiers.get(key);
-    if (manual) return manual;
-
-    // Auto-tier based on first-seen timestamp
-    const firstSeen = this.walletFirstSeen.get(key);
-    if (!firstSeen) return WalletTier.UNKNOWN;
-
-    const ageMs = Date.now() - firstSeen;
-    const ageDays = ageMs / (1000 * 60 * 60 * 24);
-
-    if (ageDays >= 30) return WalletTier.HISTORY_30D;
-    if (ageDays >= 7) return WalletTier.HISTORY_7D;
+  private calcTierFromAge(firstSeen: number): WalletTier {
+    const days = (Date.now() - firstSeen) / (1000 * 60 * 60 * 24);
+    if (days >= 30) return WalletTier.HISTORY_30D;
+    if (days >= 7) return WalletTier.HISTORY_7D;
     return WalletTier.UNKNOWN;
   }
 
-  /**
-   * Manually set a wallet's tier (e.g., for verified wallets).
-   */
-  setWalletTier(wallet: string, tier: WalletTier): void {
-    this.walletTiers.set(wallet.toLowerCase(), tier);
-  }
+  // ─── Core Methods ───────────────────────────────────────────
 
-  /**
-   * Get the daily limit for a wallet based on its tier (in token units).
-   */
-  private getDailyLimitForWallet(wallet: string): bigint {
-    const tier = this.getWalletTier(wallet);
-    const limitUsd = TIER_DAILY_LIMITS_USD[tier];
-    const decimals = BigInt(10 ** this.config.token.decimals);
-    return BigInt(limitUsd) * decimals;
-  }
-
-  /**
-   * Track first-seen timestamp for a wallet.
-   */
-  private trackWalletFirstSeen(wallet: string): void {
+  async getPendingAmount(wallet: string): Promise<bigint> {
     const key = wallet.toLowerCase();
-    if (!this.walletFirstSeen.has(key)) {
-      this.walletFirstSeen.set(key, Date.now());
+    if (this.useRedis()) {
+      return this.redis!.getBigInt(REDIS_KEYS.pendingByWallet(key));
+    }
+    return this.memory.pending.get(key) ?? 0n;
+  }
+
+  async getDailyUsage(wallet: string): Promise<bigint> {
+    const key = wallet.toLowerCase();
+    const date = this.today();
+
+    if (this.useRedis()) {
+      const data = await this.redis!.getJson<{ amount: string; date: string }>(
+        REDIS_KEYS.dailyUsage(key, date)
+      );
+      return data?.date === date ? BigInt(data.amount) : 0n;
+    }
+
+    const usage = this.memory.daily.get(key);
+    return usage?.date === date ? usage.amount : 0n;
+  }
+
+  async getWalletTier(wallet: string): Promise<WalletTier> {
+    const key = wallet.toLowerCase();
+
+    if (this.useRedis()) {
+      const manual = await this.redis!.get(REDIS_KEYS.walletTier(key));
+      if (manual && Object.values(WalletTier).includes(manual as WalletTier)) {
+        return manual as WalletTier;
+      }
+      const firstSeenStr = await this.redis!.get(REDIS_KEYS.walletFirstSeen(key));
+      return firstSeenStr ? this.calcTierFromAge(parseInt(firstSeenStr)) : WalletTier.UNKNOWN;
+    }
+
+    const manual = this.memory.tiers.get(key);
+    if (manual) return manual;
+    const firstSeen = this.memory.firstSeen.get(key);
+    return firstSeen ? this.calcTierFromAge(firstSeen) : WalletTier.UNKNOWN;
+  }
+
+  async setWalletTier(wallet: string, tier: WalletTier): Promise<void> {
+    const key = wallet.toLowerCase();
+    if (this.useRedis()) {
+      await this.redis!.set(REDIS_KEYS.walletTier(key), tier);
+    } else {
+      this.memory.tiers.set(key, tier);
     }
   }
 
-  /**
-   * Check if a payment passes risk limits
-   */
-  checkPayment(payment: PaymentPayload): RiskCheckResult {
+  private async trackFirstSeen(wallet: string): Promise<void> {
+    const key = wallet.toLowerCase();
+    if (this.useRedis()) {
+      if (!(await this.redis!.exists(REDIS_KEYS.walletFirstSeen(key)))) {
+        await this.redis!.set(REDIS_KEYS.walletFirstSeen(key), Date.now().toString());
+      }
+    } else if (!this.memory.firstSeen.has(key)) {
+      this.memory.firstSeen.set(key, Date.now());
+    }
+  }
+
+  // ─── Payment Risk Check ─────────────────────────────────────
+
+  async checkPayment(payment: PaymentPayload): Promise<RiskCheckResult> {
     const wallet = payment.from.toLowerCase();
     const amount = BigInt(payment.value);
-    const tier = this.getWalletTier(wallet);
 
-    // Track first seen
-    this.trackWalletFirstSeen(wallet);
+    await this.trackFirstSeen(wallet);
 
-    // 1. Check max per transaction
+    const [tier, currentPending, dailyUsed] = await Promise.all([
+      this.getWalletTier(wallet),
+      this.getPendingAmount(wallet),
+      this.getDailyUsage(wallet),
+    ]);
+
+    // Check max per transaction
     if (amount > this.limits.maxPerTransaction) {
       return {
         allowed: false,
-        reason: `Amount ${amount} exceeds max per transaction ${this.limits.maxPerTransaction}`,
+        reason: `Amount exceeds max per transaction ($${this.config.risk.maxPerTransaction})`,
         riskScore: 80,
-        currentPending: this.getPendingAmount(wallet),
-        dailyUsed: this.getDailyUsage(wallet),
+        currentPending,
+        dailyUsed,
         walletTier: tier,
       };
     }
 
-    // 2. Check pending limit
-    const currentPending = this.getPendingAmount(wallet);
+    // Check pending limit
     if (currentPending + amount > this.limits.maxPendingPerWallet) {
       return {
         allowed: false,
-        reason: `Pending ${currentPending + amount} would exceed max pending ${this.limits.maxPendingPerWallet}`,
+        reason: `Would exceed max pending ($${this.config.risk.maxPendingPerWallet})`,
         riskScore: 70,
         currentPending,
-        dailyUsed: this.getDailyUsage(wallet),
+        dailyUsed,
         walletTier: tier,
       };
     }
 
-    // 3. Check tier-based daily limit
-    const dailyUsed = this.getDailyUsage(wallet);
-    const dailyLimit = this.getDailyLimitForWallet(wallet);
-    if (dailyUsed + amount > dailyLimit) {
+    // Check daily tier limit
+    const tierLimit = BigInt(TIER_LIMITS_USD[tier]) * BigInt(10 ** this.config.token.decimals);
+    if (dailyUsed + amount > tierLimit) {
       return {
         allowed: false,
-        reason: `Daily usage would exceed tier limit (${tier}: $${TIER_DAILY_LIMITS_USD[tier]}/day)`,
+        reason: `Daily usage would exceed tier limit (${tier}: $${TIER_LIMITS_USD[tier]}/day)`,
         riskScore: 60,
         currentPending,
         dailyUsed,
@@ -180,30 +202,16 @@ export class RiskService {
       };
     }
 
-    // All checks passed
-    return {
-      allowed: true,
-      riskScore: 0,
-      currentPending,
-      dailyUsed,
-      walletTier: tier,
-    };
+    return { allowed: true, riskScore: 0, currentPending, dailyUsed, walletTier: tier };
   }
 
-  /**
-   * Reserve credit for a pending payment
-   * Called when a payment is verified and will be settled
-   */
-  reserveCredit(paymentId: string, payment: PaymentPayload, requirements: PaymentRequirements): void {
+  // ─── Credit Management ──────────────────────────────────────
+
+  async reserveCredit(paymentId: string, payment: PaymentPayload, requirements: PaymentRequirements): Promise<void> {
     const wallet = payment.from.toLowerCase();
     const amount = BigInt(payment.value);
 
-    // Add to pending
-    const currentPending = this.getPendingAmount(wallet);
-    this.pendingByWallet.set(wallet, currentPending + amount);
-
-    // Store pending settlement
-    this.pendingSettlements.set(paymentId, {
+    const settlement: PendingSettlement = {
       paymentId,
       payment,
       requirements,
@@ -212,96 +220,155 @@ export class RiskService {
       maxAttempts: this.config.settlement.maxAttempts,
       createdAt: Date.now(),
       updatedAt: Date.now(),
-    });
+    };
+
+    if (this.useRedis()) {
+      await this.redis!.withLock(`wallet:${wallet}`, async () => {
+        await this.redis!.incrBy(REDIS_KEYS.pendingByWallet(wallet), amount);
+        await this.redis!.setJson(REDIS_KEYS.pendingSettlement(paymentId), this.toStored(settlement), SETTLEMENT_TTL);
+        await this.redis!.sadd(REDIS_KEYS.allPendingSettlements, paymentId);
+      });
+    } else {
+      this.memory.pending.set(wallet, (this.memory.pending.get(wallet) ?? 0n) + amount);
+      this.memory.settlements.set(paymentId, settlement);
+    }
   }
 
-  /**
-   * Release credit after successful settlement
-   */
-  releaseCredit(paymentId: string, success: boolean): void {
-    const settlement = this.pendingSettlements.get(paymentId);
+  async releaseCredit(paymentId: string, success: boolean): Promise<void> {
+    const settlement = await this.getPendingSettlement(paymentId);
     if (!settlement) return;
 
     const wallet = settlement.payment.from.toLowerCase();
     const amount = BigInt(settlement.payment.value);
+    const date = this.today();
 
-    // Remove from pending
-    const currentPending = this.getPendingAmount(wallet);
-    this.pendingByWallet.set(wallet, currentPending > amount ? currentPending - amount : 0n);
+    if (this.useRedis()) {
+      await this.redis!.withLock(`wallet:${wallet}`, async () => {
+        await this.redis!.decrBy(REDIS_KEYS.pendingByWallet(wallet), amount);
 
-    if (success) {
-      // Add to daily usage on success
-      const dailyUsed = this.getDailyUsage(wallet);
-      this.dailyUsageByWallet.set(wallet, {
-        amount: dailyUsed + amount,
-        date: this.getDateKey(),
+        if (success) {
+          const usageKey = REDIS_KEYS.dailyUsage(wallet, date);
+          const existing = await this.redis!.getJson<{ amount: string; date: string }>(usageKey);
+          const current = existing ? BigInt(existing.amount) : 0n;
+          await this.redis!.setJson(usageKey, { amount: (current + amount).toString(), date }, DAILY_USAGE_TTL);
+        }
+
+        settlement.status = success ? 'confirmed' : 'failed';
+        settlement.updatedAt = Date.now();
+        await this.redis!.setJson(REDIS_KEYS.pendingSettlement(paymentId), this.toStored(settlement), SETTLEMENT_TTL);
+        await this.redis!.srem(REDIS_KEYS.allPendingSettlements, paymentId);
       });
-    }
+    } else {
+      const current = this.memory.pending.get(wallet) ?? 0n;
+      this.memory.pending.set(wallet, current > amount ? current - amount : 0n);
 
-    // Update settlement status
-    settlement.status = success ? 'confirmed' : 'failed';
-    settlement.updatedAt = Date.now();
-  }
+      if (success) {
+        const usage = this.memory.daily.get(wallet);
+        const currentDaily = usage?.date === date ? usage.amount : 0n;
+        this.memory.daily.set(wallet, { amount: currentDaily + amount, date });
+      }
 
-  /**
-   * Get a pending settlement by ID
-   */
-  getPendingSettlement(paymentId: string): PendingSettlement | undefined {
-    return this.pendingSettlements.get(paymentId);
-  }
-
-  /**
-   * Update a pending settlement
-   */
-  updatePendingSettlement(paymentId: string, updates: Partial<PendingSettlement>): void {
-    const settlement = this.pendingSettlements.get(paymentId);
-    if (settlement) {
-      Object.assign(settlement, updates, { updatedAt: Date.now() });
+      settlement.status = success ? 'confirmed' : 'failed';
+      settlement.updatedAt = Date.now();
     }
   }
 
-  /**
-   * Get all pending settlements
-   */
-  getAllPendingSettlements(): PendingSettlement[] {
-    return Array.from(this.pendingSettlements.values())
-      .filter(s => s.status === 'pending' || s.status === 'submitted' || s.status === 'retry');
+  // ─── Settlement Access ──────────────────────────────────────
+
+  async getPendingSettlement(paymentId: string): Promise<PendingSettlement | undefined> {
+    if (this.useRedis()) {
+      const data = await this.redis!.getJson<StoredSettlement>(REDIS_KEYS.pendingSettlement(paymentId));
+      return data ? this.fromStored(data) : undefined;
+    }
+    return this.memory.settlements.get(paymentId);
   }
 
-  /**
-   * Get all settlements that need FCR tracking (not yet L3 finalized)
-   */
-  getSettlementsNeedingFCR(): PendingSettlement[] {
-    return Array.from(this.pendingSettlements.values())
-      .filter(s => s.confirmationLevel !== 'L3' && s.tipsetHeight !== undefined);
+  async updatePendingSettlement(paymentId: string, updates: Partial<PendingSettlement>): Promise<void> {
+    const settlement = await this.getPendingSettlement(paymentId);
+    if (!settlement) return;
+
+    Object.assign(settlement, updates, { updatedAt: Date.now() });
+
+    if (this.useRedis()) {
+      await this.redis!.setJson(REDIS_KEYS.pendingSettlement(paymentId), this.toStored(settlement), SETTLEMENT_TTL);
+    } else {
+      this.memory.settlements.set(paymentId, settlement);
+    }
   }
 
-  /**
-   * Get risk limits for display
-   */
+  async getAllPendingSettlements(): Promise<PendingSettlement[]> {
+    if (this.useRedis()) {
+      const ids = await this.redis!.smembers(REDIS_KEYS.allPendingSettlements);
+      if (ids.length === 0) return [];
+
+      const keys = ids.map(id => REDIS_KEYS.pendingSettlement(id));
+      const results = await this.redis!.mgetJson<StoredSettlement>(keys);
+
+      return results
+        .filter((d): d is StoredSettlement => d !== null)
+        .map(d => this.fromStored(d))
+        .filter(s => ['pending', 'submitted', 'retry'].includes(s.status));
+    }
+
+    return Array.from(this.memory.settlements.values())
+      .filter(s => ['pending', 'submitted', 'retry'].includes(s.status));
+  }
+
+  async getSettlementsNeedingFCR(): Promise<PendingSettlement[]> {
+    const all = await this.getAllPendingSettlements();
+    return all.filter(s => s.confirmationLevel !== 'L3' && s.tipsetHeight !== undefined);
+  }
+
+  // ─── Utilities ──────────────────────────────────────────────
+
   getLimits(): RiskLimits {
     return { ...this.limits };
   }
 
-  /**
-   * Get stats for health check
-   */
-  getStats(): {
+  async getStats(): Promise<{
     totalPendingSettlements: number;
     totalPendingAmount: bigint;
     walletsWithPending: number;
-  } {
+    redisEnabled: boolean;
+  }> {
+    const settlements = await this.getAllPendingSettlements();
+
     let totalPendingAmount = 0n;
     let walletsWithPending = 0;
-    for (const amount of this.pendingByWallet.values()) {
+
+    // Count from settlements directly (simpler, no scan needed)
+    const walletAmounts = new Map<string, bigint>();
+    for (const s of settlements) {
+      const wallet = s.payment.from.toLowerCase();
+      const amount = BigInt(s.payment.value);
+      walletAmounts.set(wallet, (walletAmounts.get(wallet) ?? 0n) + amount);
+    }
+
+    for (const amount of walletAmounts.values()) {
       totalPendingAmount += amount;
       if (amount > 0n) walletsWithPending++;
     }
 
     return {
-      totalPendingSettlements: this.getAllPendingSettlements().length,
+      totalPendingSettlements: settlements.length,
       totalPendingAmount,
       walletsWithPending,
+      redisEnabled: this.useRedis(),
     };
+  }
+
+  async loadFromRedis(): Promise<void> {
+    if (!this.useRedis()) return;
+    console.log('Redis persistence enabled');
+  }
+
+  // ─── Serialization ──────────────────────────────────────────
+
+  private toStored(s: PendingSettlement): StoredSettlement {
+    return { ...s, payment: { ...s.payment, value: s.payment.value.toString() } };
+  }
+
+  private fromStored(d: StoredSettlement): PendingSettlement {
+    return { ...d, payment: { ...d.payment, value: d.payment.value } } as PendingSettlement;
   }
 }

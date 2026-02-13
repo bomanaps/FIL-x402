@@ -16,6 +16,7 @@ import {
   DeferredService,
   FeeService,
   PolicyService,
+  RedisService,
 } from './services/index.js';
 import {
   createVerifyRoute,
@@ -35,6 +36,16 @@ function loadConfig(): Config {
     server: {
       port: parseInt(process.env.PORT || '3402'),
       host: process.env.HOST || '0.0.0.0',
+    },
+    redis: {
+      enabled: process.env.REDIS_ENABLED === 'true',
+      host: process.env.REDIS_HOST || 'localhost',
+      port: parseInt(process.env.REDIS_PORT || '6379'),
+      password: process.env.REDIS_PASSWORD,
+      db: parseInt(process.env.REDIS_DB || '0'),
+      keyPrefix: process.env.REDIS_KEY_PREFIX || 'fcr-x402:',
+      maxRetries: parseInt(process.env.REDIS_MAX_RETRIES || '3'),
+      retryDelayMs: parseInt(process.env.REDIS_RETRY_DELAY_MS || '1000'),
     },
     lotus: {
       endpoint: process.env.LOTUS_ENDPOINT || defaultConfig.lotus.endpoint,
@@ -85,11 +96,11 @@ function loadConfig(): Config {
 /**
  * Create and configure the application
  */
-function createApp(config: Config) {
+function createApp(config: Config, redis?: RedisService) {
   // Initialize core services
   const lotus = new LotusService(config);
   const signature = new SignatureService(config, config.token.name);
-  const risk = new RiskService(config);
+  const risk = new RiskService(config, redis);
   const verify = new VerifyService(config, lotus, signature, risk);
   const f3 = new F3Service(config);
   const fee = new FeeService(config.token.decimals);
@@ -191,7 +202,7 @@ function createApp(config: Config) {
     });
   });
 
-  return { app, settle, f3 };
+  return { app, settle, f3, risk };
 }
 
 /**
@@ -201,7 +212,21 @@ async function main() {
   console.log('FCR-x402 Facilitator starting...');
 
   const config = loadConfig();
-  const { app, settle, f3 } = createApp(config);
+
+  // Initialize Redis if enabled
+  let redis: RedisService | undefined;
+  if (config.redis.enabled) {
+    console.log(`Connecting to Redis at ${config.redis.host}:${config.redis.port}...`);
+    redis = new RedisService(config);
+    await redis.connect();
+  }
+
+  const { app, settle, f3, risk } = createApp(config, redis);
+
+  // Load state from Redis if available
+  if (redis?.isAvailable()) {
+    await risk.loadFromRedis();
+  }
 
   // Start settlement worker
   settle.startWorker();
@@ -212,19 +237,18 @@ async function main() {
   }
 
   // Handle shutdown
-  process.on('SIGINT', () => {
+  const shutdown = async () => {
     console.log('\nShutting down...');
     settle.stopWorker();
     f3.stop();
+    if (redis) {
+      await redis.disconnect();
+    }
     process.exit(0);
-  });
+  };
 
-  process.on('SIGTERM', () => {
-    console.log('\nShutting down...');
-    settle.stopWorker();
-    f3.stop();
-    process.exit(0);
-  });
+  process.on('SIGINT', shutdown);
+  process.on('SIGTERM', shutdown);
 
   // Start server
   console.log(`Starting server on ${config.server.host}:${config.server.port}`);
@@ -245,6 +269,9 @@ async function main() {
   console.log('Stage 3 Services:');
   console.log(`  Bond: ${process.env.BOND_CONTRACT_ADDRESS || 'disabled'}`);
   console.log(`  Escrow: ${process.env.ESCROW_CONTRACT_ADDRESS || 'disabled'}`);
+  console.log('');
+  console.log('Storage:');
+  console.log(`  Redis: ${redis?.isAvailable() ? `connected (${config.redis.host}:${config.redis.port})` : 'disabled (using in-memory)'}`);
   console.log('');
 
   serve({

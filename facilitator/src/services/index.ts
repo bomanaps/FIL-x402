@@ -8,3 +8,4 @@ export { BondService } from './bond.js';
 export { DeferredService } from './deferred.js';
 export { FeeService } from './fee.js';
 export { PolicyService } from './policy.js';
+export { RedisService, REDIS_KEYS } from './redis.js';
