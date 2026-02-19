@@ -9,6 +9,7 @@ const navItems = [
   { href: '/buyer', label: 'Buyer' },
   { href: '/provider', label: 'Provider' },
   { href: '/dashboard', label: 'Dashboard' },
+  { href: '/agent', label: 'Agent' },
 ];
 
 export function Navigation() {

@@ -1,4 +1,4 @@
-# FIL x402: Instant Payments on Filecoin
+# FCR-x402: Instant Payments on Filecoin
 
 Technical specification for solving the finality problem.
 
@@ -618,25 +618,45 @@ Both paths work together: optimistic for frictionless onboarding, subnet for gua
   - DeferredPaymentEscrow: `0x3EE8f61b928295492886C6509D591da132531ef3`
 
 ### Stage 4: Production Hardening (Planned)
-- Persistent storage (replace in-memory voucher store)
+- Redis persistence for voucher store (risk service already uses Redis)
 - Key management and rotation
 - Rate limiting and DDoS protection
 - Monitoring, alerting, and dashboards
 - Security audit
 - Mainnet deployment
 
-### Stage 5: EIP-8004 Trustless Agents Integration (Planned)
+### Stage 5: ERC-8004 Trustless Agents Integration (In Progress)
 
-EIP-8004 defines three on-chain registries for autonomous agent discovery and trust. It explicitly supports x402 payments. Integrating this standard positions us as the payment layer for the AI agent economy.
+ERC-8004 defines three on-chain registries for autonomous agent discovery and trust. It explicitly supports x402 payments. Integrating this standard positions us as the payment layer for the AI agent economy.
 
-#### Why EIP-8004
+**Deployed to Calibration:**
+- IdentityRegistry: `0x8A30335A7eff4450671E6aE412Fc786001ce149c`
+- ReputationRegistry: `0x0510a352722D504767A86B961a493BBB3208a9a5`
+- ValidationRegistry: `0x151EC586050d500e423f352A8EE6d781F7c7bE9E`
+- Facilitator registered as Agent ID: `0`
 
-| Problem Today | EIP-8004 Solution |
+**Completed:**
+- [x] Deploy ERC-8004 registries (Identity, Reputation, Validation)
+- [x] Register facilitator as ERC-8004 agent
+- [x] HTTP metadata endpoint (`/agent/agent-metadata`)
+- [x] Agent status endpoint (`/agent/status`)
+- [x] Well-known discovery endpoint (`/.well-known/erc8004-agent.json`)
+- [x] Demo frontend Agent page
+
+**Remaining:**
+- [ ] Reputation integration (requires external feedback - self-feedback not allowed)
+- [ ] Validation integration (requires third-party validators)
+- [ ] Provider discovery endpoint
+- [ ] IPFS metadata (optional, HTTP works for testnet)
+
+#### Why ERC-8004
+
+| Problem Today | ERC-8004 Solution |
 |---------------|-------------------|
 | Providers must be known upfront | Identity Registry enables discovery |
 | Risk tiers are time-based only | Reputation Registry enables trust-based tiers |
 | No proof of delivery | Validation Registry provides on-chain attestations |
-| No standard for agent-to-agent payments | x402 + EIP-8004 = complete stack |
+| No standard for agent-to-agent payments | x402 + ERC-8004 = complete stack |
 
 #### Integration Points
 
@@ -678,29 +698,35 @@ Facilitator attests:
 
 #### Implementation Steps
 
-1. **Deploy Identity Registry** (or use existing deployment)
-   - Register facilitator as an agent
-   - Define x402 provider registration schema
+1. **Deploy ERC-8004 Registries** ✅
+   - Deployed all 3 registries using UUPS proxy pattern
+   - Contracts in `contracts/lib/erc8004-contracts/` (git submodule)
+   - Deploy script: `contracts/scripts/deploy-erc8004.ts`
 
-2. **Integrate Reputation Registry**
-   - Call `giveFeedback()` after each successful settlement
-   - Include `proofOfPayment` with transaction details
-   - Query reputation in `RiskService.getWalletTier()`
+2. **Register Facilitator as Agent** ✅
+   - Registration script: `facilitator/scripts/register-agent.ts`
+   - Agent ID: 0 assigned on Calibration
+   - Metadata served via HTTP endpoint
 
-3. **Integrate Validation Registry**
-   - Facilitator becomes a validator
-   - Attest to payment settlements via `validationResponse()`
-   - Providers can request validation for delivery proof
+3. **Agent Metadata & Status Endpoints** ✅
+   - Service: `facilitator/src/services/erc8004.ts`
+   - Routes: `facilitator/src/routes/agent.ts`
+   - Endpoints: `/agent/agent-metadata`, `/agent/status`, `/.well-known/erc8004-agent.json`
 
-4. **Provider Discovery Endpoint**
+4. **Integrate Reputation Registry** (Pending)
+   - Note: Self-feedback NOT allowed (contract enforces `isAuthorizedOrOwner`)
+   - Requires external parties to give feedback on agent
+   - Future: Call `giveFeedback()` from client after service delivery
+
+5. **Integrate Validation Registry** (Pending)
+   - Requires third-party validators
+   - Future: Facilitator becomes a validator for other agents
+
+6. **Provider Discovery Endpoint** (Pending)
    - `GET /discover` — query Identity Registry for x402 providers
    - Filter by reputation, validation scores, supported tokens
 
-5. **Agent Registration Helper**
-   - `POST /register` — helper to register providers in Identity Registry
-   - Auto-populate x402Support and facilitator endpoint
-
-#### New Endpoints
+#### Planned Endpoints (Not Yet Implemented)
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
@@ -709,15 +735,20 @@ Facilitator attests:
 | `/reputation/:agentId` | GET | Get reputation summary for an agent |
 | `/validate/:paymentId` | POST | Request/submit validation attestation |
 
-#### New Services
+#### Current Implementation
 
-```
+```text
 facilitator/src/services/
-  eip8004/
-    identity.ts      — Identity Registry interaction
-    reputation.ts    — Reputation Registry interaction
-    validation.ts    — Validation Registry interaction
-    discovery.ts     — Provider discovery logic
+  erc8004.ts         — ERC-8004 service (identity, reputation, validation)
+
+facilitator/src/routes/
+  agent.ts           — Agent metadata and status endpoints
+
+contracts/lib/
+  erc8004-contracts/ — ERC-8004 registry contracts (git submodule)
+
+demo/src/app/
+  agent/page.tsx     — ERC-8004 visualization page
 ```
 
 #### Benefits
@@ -730,9 +761,9 @@ facilitator/src/services/
 
 #### Dependencies
 
-- EIP-8004 registry contracts deployed (or deploy our own)
-- IPFS/Arweave for off-chain registration files
-- May require subgraph for efficient registry queries
+- ✅ ERC-8004 registry contracts deployed to Calibration
+- IPFS/Arweave for off-chain registration files (optional, HTTP works for testnet)
+- May require subgraph for efficient registry queries (future)
 
 ### Stage 6: Ecosystem Integration & Go-to-Market (Planned)
 
@@ -797,7 +828,7 @@ AI agents need Filecoin for:
 - Payment rails without human approval
 - Micropayments for per-inference billing
 
-We're the only x402 facilitator on Filecoin. With EIP-8004 (Stage 5), agents can discover us on-chain.
+We're the only x402 facilitator on Filecoin. With ERC-8004 (Stage 5), agents can discover us on-chain.
 
 Target channels:
 - Filecoin hackathons and grants

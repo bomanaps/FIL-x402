@@ -17,13 +17,16 @@ import {
   FeeService,
   PolicyService,
   RedisService,
+  ERC8004Service,
 } from './services/index.js';
+import type { ERC8004Config } from './services/index.js';
 import {
   createVerifyRoute,
   createSettleRoute,
   createHealthRoute,
   createFcrRoute,
   createDeferredRoutes,
+  createAgentRoute,
 } from './routes/index.js';
 import type { BondConfig } from './types/bond.js';
 import type { DeferredConfig } from './types/deferred.js';
@@ -143,6 +146,29 @@ function createApp(config: Config, redis?: RedisService) {
     }
   }
 
+  // Initialize ERC-8004 service (optional)
+  let erc8004: ERC8004Service | undefined;
+  const erc8004Config: ERC8004Config = {
+    enabled: !!process.env.ERC8004_IDENTITY_REGISTRY,
+    identityRegistry: process.env.ERC8004_IDENTITY_REGISTRY,
+    reputationRegistry: process.env.ERC8004_REPUTATION_REGISTRY,
+    validationRegistry: process.env.ERC8004_VALIDATION_REGISTRY,
+    agentId: process.env.ERC8004_AGENT_ID ? parseInt(process.env.ERC8004_AGENT_ID) : undefined,
+  };
+  if (erc8004Config.enabled) {
+    try {
+      erc8004 = new ERC8004Service(config, erc8004Config, provider);
+      console.log(`ERC-8004 service enabled: ${erc8004Config.identityRegistry}`);
+      if (erc8004Config.agentId !== undefined) {
+        console.log(`  Agent ID: ${erc8004Config.agentId}`);
+      } else {
+        console.log('  Agent ID: not registered yet');
+      }
+    } catch (error) {
+      console.warn('ERC-8004 service initialization failed:', error);
+    }
+  }
+
   const settle = new SettleService(config, lotus, signature, risk, verify, f3, bond);
 
   // Create Hono app
@@ -180,6 +206,15 @@ function createApp(config: Config, redis?: RedisService) {
     app.route('/deferred', createDeferredRoutes(deferred));
   }
 
+  // Mount ERC-8004 agent routes if enabled
+  if (erc8004) {
+    app.route('/agent', createAgentRoute(erc8004));
+    // Also mount at root for well-known path
+    app.get('/.well-known/erc8004-agent.json', (c) => {
+      return c.json(erc8004!.getAgentMetadata());
+    });
+  }
+
   // Root endpoint
   app.get('/', (c) => {
     return c.json({
@@ -189,6 +224,8 @@ function createApp(config: Config, redis?: RedisService) {
       fcrEnabled: config.fcr.enabled,
       bondEnabled: bondConfig.enabled,
       deferredEnabled: deferredConfig.enabled,
+      erc8004Enabled: erc8004Config.enabled,
+      erc8004AgentId: erc8004Config.agentId,
       endpoints: {
         verify: '/verify',
         settle: '/settle',
@@ -197,6 +234,11 @@ function createApp(config: Config, redis?: RedisService) {
         ...(deferredConfig.enabled ? {
           deferred_buyers: '/deferred/buyers/:address',
           deferred_vouchers: '/deferred/vouchers',
+        } : {}),
+        ...(erc8004Config.enabled ? {
+          agent_metadata: '/agent/agent-metadata',
+          agent_status: '/agent/status',
+          well_known: '/.well-known/erc8004-agent.json',
         } : {}),
       },
     });
@@ -269,6 +311,12 @@ async function main() {
   console.log('Stage 3 Services:');
   console.log(`  Bond: ${process.env.BOND_CONTRACT_ADDRESS || 'disabled'}`);
   console.log(`  Escrow: ${process.env.ESCROW_CONTRACT_ADDRESS || 'disabled'}`);
+  console.log('');
+  console.log('Stage 5 ERC-8004:');
+  console.log(`  Identity Registry: ${process.env.ERC8004_IDENTITY_REGISTRY || 'disabled'}`);
+  console.log(`  Reputation Registry: ${process.env.ERC8004_REPUTATION_REGISTRY || 'disabled'}`);
+  console.log(`  Validation Registry: ${process.env.ERC8004_VALIDATION_REGISTRY || 'disabled'}`);
+  console.log(`  Agent ID: ${process.env.ERC8004_AGENT_ID || 'not registered'}`);
   console.log('');
   console.log('Storage:');
   console.log(`  Redis: ${redis?.isAvailable() ? `connected (${config.redis.host}:${config.redis.port})` : 'disabled (using in-memory)'}`);

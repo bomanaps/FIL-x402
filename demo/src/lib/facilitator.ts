@@ -99,6 +99,57 @@ export interface BuyerAccount {
   }>;
 }
 
+// ERC-8004 Agent Types
+export interface AgentMetadata {
+  name: string;
+  description: string;
+  version: string;
+  type: string;
+  capabilities: string[];
+  endpoint: string;
+  chain: {
+    id: number;
+    name: string;
+  };
+  contracts: {
+    bond?: string;
+    escrow?: string;
+  };
+  limits: {
+    maxPerTransaction: number;
+    maxPendingPerWallet: number;
+    dailyLimitPerWallet: number;
+  };
+  erc8004: {
+    agentId?: number;
+    identityRegistry: string;
+    reputationRegistry: string;
+    validationRegistry: string;
+  };
+}
+
+export interface AgentStatus {
+  enabled: boolean;
+  registered: boolean;
+  agentId?: number;
+  message?: string;
+  reputation?: {
+    count: number;
+    averageValue: number;
+    valueDecimals: number;
+  };
+  validation?: {
+    count: number;
+    avgResponse: number;
+  };
+  registryVersions?: {
+    identity?: string;
+    reputation?: string;
+    validation?: string;
+  };
+  error?: string;
+}
+
 class FacilitatorAPI {
   private baseUrl: string;
 
@@ -194,8 +245,19 @@ class FacilitatorAPI {
     fcrEnabled: boolean;
     bondEnabled: boolean;
     deferredEnabled: boolean;
+    erc8004Enabled?: boolean;
+    erc8004AgentId?: number;
   }> {
     return this.request('/');
+  }
+
+  // ERC-8004 Agent endpoints
+  async getAgentMetadata(): Promise<AgentMetadata> {
+    return this.request<AgentMetadata>('/agent/agent-metadata');
+  }
+
+  async getAgentStatus(): Promise<AgentStatus> {
+    return this.request<AgentStatus>('/agent/status');
   }
 }
 
