@@ -1,0 +1,3 @@
+[submodule "contracts/contracts/erc8004"]
+	path = contracts/contracts/erc8004
+	url = https://github.com/erc-8004/erc-8004-contracts.git
