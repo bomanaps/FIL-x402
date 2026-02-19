@@ -295,6 +295,12 @@ Filecoin's Fast Confirmation Rule using F3/GossiPBFT consensus:
 | `RISK_MAX_PENDING` | `50` | Max USD pending per wallet |
 | `RISK_DAILY_LIMIT` | `500` | Max USD per wallet per day |
 | `FCR_ENABLED` | `true` | Enable F3 monitoring |
+| `REDIS_ENABLED` | `false` | Enable Redis persistence (recommended for production) |
+| `REDIS_HOST` | `localhost` | Redis server host |
+| `REDIS_PORT` | `6379` | Redis server port |
+| `REDIS_PASSWORD` | — | Redis password (optional) |
+| `REDIS_DB` | `0` | Redis database index |
+| `REDIS_KEY_PREFIX` | `fcr-x402:` | Key prefix for namespacing |
 
 ## Project Structure
 
@@ -337,6 +343,7 @@ FIL-x402/
         deferred.ts                   Escrow + voucher management
         fee.ts                        Fee calculation
         policy.ts                     Provider policy engine
+        redis.ts                      Redis persistence + distributed locking
       routes/
         verify.ts                     POST /verify
         settle.ts                     POST /settle, GET /settle/:id
@@ -353,8 +360,26 @@ FIL-x402/
 
 - **F3 is not active on Calibration testnet.** Public RPCs return stale F3 certificates (~23 days behind). The facilitator uses time-based heuristics as a fallback: L1 immediate, L2 at 30s, L3 at 60s. On mainnet, real F3 tracking works via `F3GetLatestCertificate`.
 - **USDFC contract uses v,r,s signature format.** The EIP-3009 `transferWithAuthorization` on Calibration uses `(address,address,uint256,uint256,uint256,bytes32,uint8,bytes32,bytes32)`, not the `bytes signature` variant. This is handled automatically.
-- **In-memory voucher store.** Stored vouchers are lost on server restart. A persistent database would be needed for production.
-- **Single facilitator wallet.** All settlements and bond operations use one private key. Production would need key management and rotation.
+- **Single facilitator wallet.** All settlements and bond operations use one private key. Production would need key management (HSM/multi-sig) and rotation.
+- **Redis optional but recommended.** Enable `REDIS_ENABLED=true` for persistent storage of risk tracking, settlements, and vouchers. Without Redis, data is stored in-memory and lost on restart.
+
+## Mainnet Configuration
+
+When deploying to Filecoin Mainnet, update these settings:
+
+| Setting | Calibration (Testnet) | Mainnet |
+|---------|----------------------|---------|
+| `CHAIN_ID` | `314159` | `314` |
+| `LOTUS_ENDPOINT` | `https://api.calibration.node.glif.io/rpc/v1` | `https://api.node.glif.io/rpc/v1` |
+| `TOKEN_ADDRESS` | `0xb3042734b608a1B16e9e86B374A3f3e389B4cDf0` | TBD (mainnet USDFC) |
+| `BOND_CONTRACT_ADDRESS` | `0x0C79179E91246998A7F3b372de69ba2a112a37ed` | Redeploy required |
+| `ESCROW_CONTRACT_ADDRESS` | `0x3EE8f61b928295492886C6509D591da132531ef3` | Redeploy required |
+
+**Additional mainnet requirements:**
+- Enable Redis persistence (`REDIS_ENABLED=true`)
+- Use HSM or multi-sig for facilitator key
+- Deploy contracts with audited code
+- Configure monitoring and alerting
 
 ## Roadmap
 
@@ -373,3 +398,7 @@ FIL-x402/
 - [Implementation Roadmap](./plan.md) — 6-stage plan (Stages 1-3 complete)
 - [API Reference](./facilitator/docs/api.md) — Endpoint details
 - [Risk Model](./facilitator/docs/risk.md) — Risk management details
+
+## License
+
+MIT
