@@ -136,7 +136,7 @@ function createApp(config: Config, redis?: RedisService) {
   };
   if (deferredConfig.enabled && deferredConfig.contractAddress) {
     try {
-      deferred = new DeferredService(config, deferredConfig, provider);
+      deferred = new DeferredService(config, deferredConfig, provider, redis);
       console.log(`Deferred service enabled: ${deferredConfig.contractAddress}`);
     } catch (error) {
       console.warn('Deferred service initialization failed:', error);

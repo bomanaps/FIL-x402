@@ -1,6 +1,9 @@
 import { ethers } from 'ethers';
 import type { Config } from '../types/config.js';
 import type { Voucher, EscrowAccount, StoredVoucher, DeferredConfig } from '../types/deferred.js';
+import { RedisService, REDIS_KEYS } from './redis.js';
+
+const VOUCHER_TTL = 7 * 24 * 60 * 60; // 7 days
 
 const ESCROW_ABI = [
   'function deposit(uint256 amount) external',
@@ -17,16 +20,21 @@ export class DeferredService {
   private contract: ethers.Contract;
   private readContract: ethers.Contract;
   private deferredConfig: DeferredConfig;
+  private redis: RedisService | null;
 
-  // In-memory voucher store (voucherId -> latest voucher)
-  private voucherStore: Map<string, StoredVoucher> = new Map();
+  // In-memory voucher store (fallback when Redis unavailable)
+  private memory = {
+    vouchers: new Map<string, StoredVoucher>(),
+  };
 
   constructor(
     config: Config,
     deferredConfig: DeferredConfig,
-    provider: ethers.JsonRpcProvider
+    provider: ethers.JsonRpcProvider,
+    redis?: RedisService
   ) {
     this.deferredConfig = deferredConfig;
+    this.redis = redis ?? null;
 
     if (!deferredConfig.contractAddress) {
       throw new Error('Escrow contract address not configured');
@@ -52,6 +60,14 @@ export class DeferredService {
     }
   }
 
+  private useRedis(): boolean {
+    return this.redis?.isAvailable() ?? false;
+  }
+
+  private voucherKey(voucherId: string, buyer: string, seller: string): string {
+    return `${voucherId}:${buyer.toLowerCase()}:${seller.toLowerCase()}`;
+  }
+
   /**
    * Get escrow account state for a buyer.
    */
@@ -67,11 +83,11 @@ export class DeferredService {
   /**
    * Store a signed voucher. Validates basic fields before storing.
    */
-  storeVoucher(voucher: Voucher): StoredVoucher {
-    const key = `${voucher.id}:${voucher.buyer}:${voucher.seller}`;
+  async storeVoucher(voucher: Voucher): Promise<StoredVoucher> {
+    const key = this.voucherKey(voucher.id, voucher.buyer, voucher.seller);
 
     // Check if we already have a voucher with higher or equal nonce
-    const existing = this.voucherStore.get(key);
+    const existing = await this.getLatestVoucher(voucher.id, voucher.buyer, voucher.seller);
     if (existing && existing.voucher.nonce >= voucher.nonce) {
       throw new Error(`Stale voucher: existing nonce ${existing.voucher.nonce} >= ${voucher.nonce}`);
     }
@@ -82,24 +98,56 @@ export class DeferredService {
       settled: false,
     };
 
-    this.voucherStore.set(key, stored);
+    if (this.useRedis()) {
+      await this.redis!.setJson(
+        REDIS_KEYS.voucher(voucher.id, voucher.buyer, voucher.seller),
+        stored,
+        VOUCHER_TTL
+      );
+      // Track voucher in buyer's set for getVouchersForBuyer
+      await this.redis!.sadd(REDIS_KEYS.vouchersByBuyer(voucher.buyer), key);
+    } else {
+      this.memory.vouchers.set(key, stored);
+    }
+
     return stored;
   }
 
   /**
    * Get the latest stored voucher for a buyer/seller pair.
    */
-  getLatestVoucher(voucherId: string, buyer: string, seller: string): StoredVoucher | undefined {
-    const key = `${voucherId}:${buyer}:${seller}`;
-    return this.voucherStore.get(key);
+  async getLatestVoucher(voucherId: string, buyer: string, seller: string): Promise<StoredVoucher | undefined> {
+    if (this.useRedis()) {
+      const stored = await this.redis!.getJson<StoredVoucher>(
+        REDIS_KEYS.voucher(voucherId, buyer, seller)
+      );
+      return stored ?? undefined;
+    }
+
+    const key = this.voucherKey(voucherId, buyer, seller);
+    return this.memory.vouchers.get(key);
   }
 
   /**
    * Get all stored vouchers for a buyer.
    */
-  getVouchersForBuyer(buyer: string): StoredVoucher[] {
+  async getVouchersForBuyer(buyer: string): Promise<StoredVoucher[]> {
+    if (this.useRedis()) {
+      const keys = await this.redis!.smembers(REDIS_KEYS.vouchersByBuyer(buyer));
+      if (keys.length === 0) return [];
+
+      // Build Redis keys from the stored key format (voucherId:buyer:seller)
+      const redisKeys = keys.map(k => {
+        const [voucherId, b, seller] = k.split(':');
+        return REDIS_KEYS.voucher(voucherId, b, seller);
+      });
+
+      const results = await this.redis!.mgetJson<StoredVoucher>(redisKeys);
+      return results.filter((v): v is StoredVoucher => v !== null);
+    }
+
     const results: StoredVoucher[] = [];
-    for (const stored of this.voucherStore.values()) {
+    for (const stored of this.memory.vouchers.values()) {
       if (stored.voucher.buyer.toLowerCase() === buyer.toLowerCase()) {
         results.push(stored);
       }
@@ -111,8 +159,7 @@ export class DeferredService {
    * Settle a single voucher by calling collect() on the escrow contract.
    */
   async settleVoucher(voucherId: string, buyer: string, seller: string): Promise<string> {
-    const key = `${voucherId}:${buyer}:${seller}`;
-    const stored = this.voucherStore.get(key);
+    const stored = await this.getLatestVoucher(voucherId, buyer, seller);
     if (!stored) {
       throw new Error('Voucher not found');
     }
@@ -137,8 +184,20 @@ export class DeferredService {
     const tx = await this.contract.collect(voucherTuple, v.signature);
     const receipt = await tx.wait();
 
+    // Update stored voucher with settlement info
     stored.settled = true;
     stored.settledTxHash = receipt.hash;
+
+    if (this.useRedis()) {
+      await this.redis!.setJson(
+        REDIS_KEYS.voucher(voucherId, buyer, seller),
+        stored,
+        VOUCHER_TTL
+      );
+    } else {
+      const key = this.voucherKey(voucherId, buyer, seller);
+      this.memory.vouchers.set(key, stored);
+    }
 
     return receipt.hash;
   }
