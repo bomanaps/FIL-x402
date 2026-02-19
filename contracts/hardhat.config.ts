@@ -1,5 +1,6 @@
 import { HardhatUserConfig } from "hardhat/config";
 import "@nomicfoundation/hardhat-toolbox";
+import "@openzeppelin/hardhat-upgrades";
 import * as dotenv from "dotenv";
 
 dotenv.config({ path: "../facilitator/.env" });
@@ -8,12 +9,14 @@ const PRIVATE_KEY = process.env.FACILITATOR_PRIVATE_KEY || "0x000000000000000000
 
 const config: HardhatUserConfig = {
   solidity: {
-    version: "0.8.20",
+    version: "0.8.24",
     settings: {
       optimizer: {
         enabled: true,
         runs: 200,
       },
+      evmVersion: "paris",  // Filecoin FEVM compatibility
+      viaIR: true,          // Required for ERC-8004 contracts (stack too deep)
     },
   },
   networks: {
