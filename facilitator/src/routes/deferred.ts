@@ -20,7 +20,7 @@ export function createDeferredRoutes(deferred: DeferredService) {
 
     try {
       const account = await deferred.getAccount(buyer);
-      const vouchers = deferred.getVouchersForBuyer(buyer);
+      const vouchers = await deferred.getVouchersForBuyer(buyer);
 
       return c.json({
         buyer,
@@ -53,7 +53,7 @@ export function createDeferredRoutes(deferred: DeferredService) {
       const voucher = c.req.valid('json');
 
       try {
-        const stored = deferred.storeVoucher(voucher);
+        const stored = await deferred.storeVoucher(voucher);
         return c.json({
           success: true,
           voucherId: voucher.id,
