@@ -1,0 +1,16 @@
+{
+  "network": "calibration",
+  "chainId": 314159,
+  "deployedAt": "2026-02-19T16:20:03.432Z",
+  "deployer": "0x9c858D31D2bD776E4dDf658DaE2792Fa43CF52d9",
+  "contracts": {
+    "IdentityRegistry": "0x8A30335A7eff4450671E6aE412Fc786001ce149c",
+    "ReputationRegistry": "0x0510a352722D504767A86B961a493BBB3208a9a5",
+    "ValidationRegistry": "0x151EC586050d500e423f352A8EE6d781F7c7bE9E"
+  },
+  "implementations": {
+    "IdentityRegistry": "0x69ea2Da6752bEA07aCadb96f289987E322765143",
+    "ReputationRegistry": "0xDbd74700fEa772317223584696602e595e69eB08",
+    "ValidationRegistry": "0x86380ef97E9E05028Bd3ed7D70aC5210032a5B18"
+  }
+}
