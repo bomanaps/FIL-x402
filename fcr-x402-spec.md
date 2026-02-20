@@ -1,6 +1,6 @@
 # FCR-x402: Fast Confirmation Rule for x402 Payments on Filecoin
 
-Technical Specification v0.2
+Technical Specification v0.3
 
 ---
 
@@ -625,9 +625,49 @@ class FCRMonitor {
 
 ---
 
-## 8. Data Integrity Layer (Future)
+## 8. ERC-8004 Agent Identity Integration
 
-### 8.1 ZK Proof Integration (Planned)
+### 8.1 Overview
+
+ERC-8004 provides on-chain agent discovery and reputation that complements the FCR confirmation model. While FCR handles payment confirmation, ERC-8004 enhances trust assessment.
+
+**Deployed registries (Calibration):**
+- IdentityRegistry: `0x8A30335A7eff4450671E6aE412Fc786001ce149c`
+- ReputationRegistry: `0x0510a352722D504767A86B961a493BBB3208a9a5`
+- ValidationRegistry: `0x151EC586050d500e423f352A8EE6d781F7c7bE9E`
+
+### 8.2 Integration with Risk Model
+
+ERC-8004 reputation can enhance wallet tier assessment:
+
+```typescript
+// Future: Combine time-based tiers with on-chain reputation
+async function getEnhancedWalletTier(address: string): Promise<WalletTier> {
+  const timeTier = await getWalletTierByHistory(address);
+  const reputation = await erc8004.getReputationSummary(agentId);
+
+  // Boost tier based on positive reputation
+  if (reputation.positiveCount > 50 && timeTier < WalletTier.VERIFIED) {
+    return WalletTier.HISTORY_30D;
+  }
+
+  return timeTier;
+}
+```
+
+### 8.3 Agent Endpoints
+
+| Endpoint | Description |
+|----------|-------------|
+| `/agent/agent-metadata` | Agent capabilities, limits, chain info |
+| `/agent/status` | Registration status, reputation summary |
+| `/.well-known/erc8004-agent.json` | Standard discovery endpoint |
+
+---
+
+## 9. Data Integrity Layer (Future)
+
+### 9.1 ZK Proof Integration (Planned)
 
 For use cases requiring data integrity verification:
 
@@ -656,7 +696,7 @@ For use cases requiring data integrity verification:
 
 ---
 
-## 9. Implementation Priority
+## 10. Implementation Priority
 
 ### Phase 1: MVP (Now)
 
@@ -686,9 +726,9 @@ For use cases requiring data integrity verification:
 
 ---
 
-## 10. Configuration Reference
+## 11. Configuration Reference
 
-### 10.1 Facilitator Configuration
+### 11.1 Facilitator Configuration
 
 ```yaml
 fcr:
@@ -744,7 +784,7 @@ bond:
 
 ---
 
-## 11. References
+## 12. References
 
 - [FIP-0086: Fast Finality in Filecoin (F3)](https://github.com/filecoin-project/FIPs/blob/master/FIPS/fip-0086.md)
 - [go-f3 Implementation](https://github.com/filecoin-project/go-f3)
@@ -752,11 +792,16 @@ bond:
 - [Ethereum FCR PR #4747](https://github.com/ethereum/consensus-specs/pull/4747)
 - [Ethereum FCR Discussion](https://github.com/ethereum/pm/issues/1870)
 - [Lotus F3 API Documentation](https://docs.filecoin.io/reference/json-rpc)
+- [ERC-8004 Agent Identity Standard](https://github.com/bomanaps/erc8004-contracts)
 
 ---
 
 ## Changelog
 
+- v0.3 (2026-02-19): ERC-8004 integration
+  - Added Section 8: ERC-8004 Agent Identity Integration
+  - Deployed registry contracts to Calibration
+  - Agent metadata and status endpoints
 - v0.2 (2026-01-22): Major revision based on feedback
   - Fixed L2 confirmation to require explicit evidence or safe heuristic
   - Removed hardcoded instance mapping; now derived from APIs

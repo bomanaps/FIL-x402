@@ -105,6 +105,9 @@ ESCROW_CONTRACT_ADDRESS=0x...
 Current deployments:
 - BondedFacilitator: `0x0C79179E91246998A7F3b372de69ba2a112a37ed`
 - DeferredPaymentEscrow: `0x3EE8f61b928295492886C6509D591da132531ef3`
+- ERC8004 IdentityRegistry: `0x8A30335A7eff4450671E6aE412Fc786001ce149c`
+- ERC8004 ReputationRegistry: `0x0510a352722D504767A86B961a493BBB3208a9a5`
+- ERC8004 ValidationRegistry: `0x151EC586050d500e423f352A8EE6d781F7c7bE9E`
 
 ### 4. Start the facilitator
 
@@ -119,11 +122,8 @@ You should see:
 FCR-x402 Facilitator starting...
 Bond service enabled: 0x0C79...
 Deferred service enabled: 0x3EE8...
+ERC-8004 service enabled: Agent #0
 Server running at http://0.0.0.0:3402
-
-Stage 3 Services:
-  Bond: 0x0C79179E91246998A7F3b372de69ba2a112a37ed
-  Escrow: 0x3EE8f61b928295492886C6509D591da132531ef3
 ```
 
 ### 5. Test a payment
@@ -166,6 +166,7 @@ Open http://localhost:3000 to see:
 - **Buyer page** — Connect wallet, sign payments, watch FCR L0→L3 progression
 - **Provider page** — Integration guide and code examples
 - **Dashboard** — Real-time facilitator monitoring
+- **Agent page** — ERC-8004 agent identity, reputation, and validation status
 
 ### 8. Run the test suite
 
@@ -207,6 +208,14 @@ npx vitest run
 | `/deferred/buyers/:address` | GET | Escrow balance, thawing state, stored vouchers |
 | `/deferred/vouchers` | POST | Store a signed EIP-712 voucher |
 | `/deferred/vouchers/:id/settle` | POST | Collect a voucher on-chain |
+
+### ERC-8004 Agent Identity
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/agent/agent-metadata` | GET | Agent metadata (name, capabilities, limits) |
+| `/agent/status` | GET | Registration status, reputation, validation |
+| `/.well-known/erc8004-agent.json` | GET | Standard discovery endpoint |
 
 ## Smart Contracts
 
@@ -301,6 +310,10 @@ Filecoin's Fast Confirmation Rule using F3/GossiPBFT consensus:
 | `REDIS_PASSWORD` | — | Redis password (optional) |
 | `REDIS_DB` | `0` | Redis database index |
 | `REDIS_KEY_PREFIX` | `fcr-x402:` | Key prefix for namespacing |
+| `ERC8004_IDENTITY_REGISTRY` | — | ERC-8004 Identity registry contract address |
+| `ERC8004_REPUTATION_REGISTRY` | — | ERC-8004 Reputation registry contract address |
+| `ERC8004_VALIDATION_REGISTRY` | — | ERC-8004 Validation registry contract address |
+| `ERC8004_AGENT_ID` | — | Registered agent ID (set after registration) |
 
 ## Project Structure
 
@@ -311,6 +324,7 @@ FIL-x402/
       buyer/page.tsx                  Payment signing + FCR tracking
       provider/page.tsx               Integration guide
       dashboard/page.tsx              Facilitator monitoring
+      agent/page.tsx                  ERC-8004 agent identity viewer
     src/lib/
       config.ts                       Chain/contract configuration
       facilitator.ts                  API client
@@ -320,6 +334,7 @@ FIL-x402/
       DeferredPaymentEscrow.sol       Escrow + EIP-712 voucher contract
       interfaces/                     Contract interfaces
       mocks/MockERC20.sol             Test token
+    lib/erc8004-contracts/            ERC-8004 registry contracts (submodule)
     test/                             Contract tests (33 tests)
     scripts/deploy.ts                 Calibration deployment script
   facilitator/                        TypeScript service (Hono)
@@ -344,16 +359,19 @@ FIL-x402/
         fee.ts                        Fee calculation
         policy.ts                     Provider policy engine
         redis.ts                      Redis persistence + distributed locking
+        erc8004.ts                    ERC-8004 agent identity service
       routes/
         verify.ts                     POST /verify
         settle.ts                     POST /settle, GET /settle/:id
         health.ts                     GET /health
         fcr.ts                        GET /fcr/*
         deferred.ts                   GET/POST /deferred/*
+        agent.ts                      GET /agent/*, /.well-known/*
       __tests__/                      Test suite (60 tests)
     scripts/
       test-payment.ts                 x402 payment flow test
       test-stage3.ts                  Bond + escrow integration test
+      register-agent.ts               ERC-8004 agent registration
 ```
 
 ## Known Limitations
@@ -374,6 +392,9 @@ When deploying to Filecoin Mainnet, update these settings:
 | `TOKEN_ADDRESS` | `0xb3042734b608a1B16e9e86B374A3f3e389B4cDf0` | TBD (mainnet USDFC) |
 | `BOND_CONTRACT_ADDRESS` | `0x0C79179E91246998A7F3b372de69ba2a112a37ed` | Redeploy required |
 | `ESCROW_CONTRACT_ADDRESS` | `0x3EE8f61b928295492886C6509D591da132531ef3` | Redeploy required |
+| `ERC8004_IDENTITY_REGISTRY` | `0x8A30335A7eff4450671E6aE412Fc786001ce149c` | Redeploy required |
+| `ERC8004_REPUTATION_REGISTRY` | `0x0510a352722D504767A86B961a493BBB3208a9a5` | Redeploy required |
+| `ERC8004_VALIDATION_REGISTRY` | `0x151EC586050d500e423f352A8EE6d781F7c7bE9E` | Redeploy required |
 
 **Additional mainnet requirements:**
 - Enable Redis persistence (`REDIS_ENABLED=true`)
@@ -389,7 +410,7 @@ When deploying to Filecoin Mainnet, update these settings:
 | 2 | FCR Integration — F3 finality monitoring, L0-L3 levels | Complete |
 | 3 | Bond + Deferred — Collateral contracts, escrow vouchers, risk tiers | Complete |
 | 4 | Production Hardening — Persistence, key management, monitoring, audit | Planned |
-| 5 | EIP-8004 Trustless Agents — Discovery, reputation, validation registries | Planned |
+| 5 | ERC-8004 Trustless Agents — Discovery, reputation, validation registries | In Progress |
 | 6 | Ecosystem Integration — Secured Finance partnership, x402 Foundation, storage provider onboarding | Planned |
 
 ## Docs

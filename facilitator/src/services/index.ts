@@ -9,3 +9,5 @@ export { DeferredService } from './deferred.js';
 export { FeeService } from './fee.js';
 export { PolicyService } from './policy.js';
 export { RedisService, REDIS_KEYS } from './redis.js';
+export { ERC8004Service } from './erc8004.js';
+export type { ERC8004Config, AgentMetadata, ReputationSummary } from './erc8004.js';
