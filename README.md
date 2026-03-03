@@ -15,6 +15,8 @@ Deployed and tested on Filecoin Calibration testnet with USDFC.
 
 ## How it works
 
+[Video Walkthrough](https://youtu.be/IgoX2aImy0s?si=_xdYRbNPlrjWWmmE)
+
 ```
   BUYER                         PROVIDER                      FACILITATOR
     |                               |                               |
