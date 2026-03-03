@@ -376,16 +376,6 @@ Calibration testnet (`chainId: 314159`):
 | ERC-8004 ReputationRegistry | `0x0510a352722D504767A86B961a493BBB3208a9a5` |
 | ERC-8004 ValidationRegistry | `0x151EC586050d500e423f352A8EE6d781F7c7bE9E` |
 
-## Roadmap
-
-| Stage | Description | Status |
-|-------|-------------|--------|
-| 1 | Core x402 protocol, EIP-3009 settlement | Complete |
-| 2 | FCR Integration — F3 finality monitoring, L0-L3 levels | Complete |
-| 3 | Bond + Deferred — Collateral contracts, escrow vouchers, risk tiers | Complete |
-| 4 | Production Hardening — Persistence, key management, monitoring | Planned |
-| 5 | ERC-8004 Trustless Agents — Discovery, reputation, validation | Complete |
-| 6 | Ecosystem Integration — x402 Foundation, storage provider onboarding | Planned |
 
 ## Documentation
 
