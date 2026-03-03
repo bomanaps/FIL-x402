@@ -150,6 +150,19 @@ export class LotusService {
   }
 
   /**
+   * Get native balance (FIL/tFIL) for an address.
+   * Used to check if facilitator has enough gas.
+   */
+  async getNativeBalance(address: string): Promise<bigint> {
+    try {
+      const balance = await this.provider.getBalance(address);
+      return balance;
+    } catch (error) {
+      throw new Error(`Failed to get native balance for ${address}: ${error}`);
+    }
+  }
+
+  /**
    * Check if the service is connected and working
    */
   async healthCheck(): Promise<boolean> {

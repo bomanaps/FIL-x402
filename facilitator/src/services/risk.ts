@@ -26,7 +26,7 @@ const TIER_LIMITS_USD: Record<WalletTier, number> = {
 };
 
 const DAILY_USAGE_TTL = 25 * 60 * 60; // 25 hours
-const SETTLEMENT_TTL = 24 * 60 * 60;  // 24 hours
+const SETTLEMENT_TTL = 7 * 24 * 60 * 60;  // 7 days - extended to handle slow F3 finalization
 
 interface StoredSettlement {
   paymentId: string;

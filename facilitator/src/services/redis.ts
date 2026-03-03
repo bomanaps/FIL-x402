@@ -157,7 +157,7 @@ export class RedisService {
     });
   }
 
-  // Distributed lock
+  // Distributed lock with callback
   async withLock<T>(resource: string, fn: () => Promise<T>, ttlMs = 30000): Promise<T> {
     if (!this.client) return fn(); // No lock needed if no Redis
 
@@ -182,5 +182,49 @@ export class RedisService {
       `;
       await this.client.eval(script, 1, lockKey, token);
     }
+  }
+
+  // Lock token storage for acquireLock/releaseLock pattern
+  private lockTokens: Map<string, string> = new Map();
+
+  /**
+   * Acquire a distributed lock. Returns true if lock acquired, false otherwise.
+   * Use releaseLock() to release when done.
+   */
+  async acquireLock(resource: string, ttlMs = 30000): Promise<boolean> {
+    if (!this.client) return true; // No Redis = always succeed (in-memory handled by caller)
+
+    const lockKey = REDIS_KEYS.lock(resource);
+    const token = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const ttlSeconds = Math.ceil(ttlMs / 1000);
+
+    const acquired = await this.client.set(lockKey, token, 'EX', ttlSeconds, 'NX');
+    if (acquired === 'OK') {
+      this.lockTokens.set(lockKey, token);
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * Release a previously acquired lock.
+   */
+  async releaseLock(resource: string): Promise<void> {
+    if (!this.client) return;
+
+    const lockKey = REDIS_KEYS.lock(resource);
+    const token = this.lockTokens.get(lockKey);
+    if (!token) return;
+
+    // Atomic compare-and-delete to prevent releasing someone else's lock
+    const script = `
+      if redis.call("get", KEYS[1]) == ARGV[1] then
+        return redis.call("del", KEYS[1])
+      else
+        return 0
+      end
+    `;
+    await this.client.eval(script, 1, lockKey, token);
+    this.lockTokens.delete(lockKey);
   }
 }

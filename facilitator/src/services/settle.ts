@@ -11,6 +11,10 @@ import { RiskService } from './risk.js';
 import { VerifyService } from './verify.js';
 import type { F3Service } from './f3.js';
 import type { BondService } from './bond.js';
+import type { RedisService } from './redis.js';
+
+// Minimum gas balance required for facilitator (0.1 FIL in attoFIL)
+const MIN_FACILITATOR_GAS_BALANCE = BigInt('100000000000000000');
 
 export class SettleService {
   private lotus: LotusService;
@@ -20,10 +24,14 @@ export class SettleService {
   private config: Config;
   private f3: F3Service | null;
   private bond: BondService | null;
+  private redis: RedisService | null;
 
   // Settlement worker state
   private isProcessing: boolean = false;
   private settlementInterval: ReturnType<typeof setInterval> | null = null;
+
+  // In-memory lock for non-Redis mode
+  private inProgressPayments: Set<string> = new Set();
 
   constructor(
     config: Config,
@@ -32,7 +40,8 @@ export class SettleService {
     risk: RiskService,
     verify: VerifyService,
     f3?: F3Service,
-    bond?: BondService
+    bond?: BondService,
+    redis?: RedisService
   ) {
     this.config = config;
     this.lotus = lotus;
@@ -41,6 +50,40 @@ export class SettleService {
     this.verify = verify;
     this.f3 = f3 || null;
     this.bond = bond || null;
+    this.redis = redis || null;
+  }
+
+  /**
+   * Acquire a distributed lock on payment nonce to prevent concurrent double-submit.
+   * Uses Redis if available, otherwise falls back to in-memory Set.
+   */
+  private async acquireNonceLock(payment: PaymentPayload): Promise<boolean> {
+    const lockKey = `nonce:${payment.from.toLowerCase()}:${payment.nonce}`;
+
+    if (this.redis?.isAvailable()) {
+      // Use Redis distributed lock with 60s TTL
+      return this.redis.acquireLock(lockKey, 60000);
+    }
+
+    // In-memory fallback
+    if (this.inProgressPayments.has(lockKey)) {
+      return false;
+    }
+    this.inProgressPayments.add(lockKey);
+    return true;
+  }
+
+  /**
+   * Release the nonce lock after settlement completes.
+   */
+  private async releaseNonceLock(payment: PaymentPayload): Promise<void> {
+    const lockKey = `nonce:${payment.from.toLowerCase()}:${payment.nonce}`;
+
+    if (this.redis?.isAvailable()) {
+      await this.redis.releaseLock(lockKey);
+    } else {
+      this.inProgressPayments.delete(lockKey);
+    }
   }
 
   /**
@@ -64,101 +107,154 @@ export class SettleService {
       };
     }
 
-    // Verify payment first
-    const verifyResult = await this.verify.verify(payment, requirements);
-    if (!verifyResult.valid) {
+    // Acquire distributed lock on payment nonce to prevent concurrent double-submit
+    const lockAcquired = await this.acquireNonceLock(payment);
+    if (!lockAcquired) {
       return {
         success: false,
         paymentId,
-        error: verifyResult.reason,
+        error: 'payment_submission_in_progress',
       };
     }
 
-    // Reserve credit
-    await this.risk.reserveCredit(paymentId, payment, requirements);
-
-    // Commit bond if bond service is available
-    if (this.bond) {
-      try {
-        const hasCapacity = await this.bond.hasCapacity(BigInt(payment.value));
-        if (!hasCapacity) {
-          return {
-            success: false,
-            paymentId,
-            error: 'insufficient_bond_capacity',
-          };
-        }
-        await this.bond.commitPayment(paymentId, requirements.payTo, BigInt(payment.value));
-      } catch (error) {
+    try {
+      // Verify payment first
+      const verifyResult = await this.verify.verify(payment, requirements);
+      if (!verifyResult.valid) {
         return {
           success: false,
           paymentId,
-          error: `bond_commit_failed: ${error}`,
+          error: verifyResult.reason,
         };
       }
-    }
 
-    // Submit transaction to chain
-    try {
-      const txCid = await this.lotus.submitTransferWithAuthorization(
-        payment.from,
-        payment.to,
-        payment.value,
-        payment.validAfter,
-        payment.validBefore,
-        payment.nonce,
-        payment.signature
-      );
-
-      // Capture current block height as the tipset this payment targets
-      let tipsetHeight: number | undefined;
+      // Check facilitator has sufficient gas before proceeding
       try {
-        tipsetHeight = await this.lotus.getBlockNumber();
-      } catch {
-        // Non-fatal: we just won't have per-payment FCR tracking
+        const facilitatorGas = await this.lotus.getNativeBalance(
+          this.config.facilitator.address!
+        );
+        if (facilitatorGas < MIN_FACILITATOR_GAS_BALANCE) {
+          console.error(
+            `Facilitator gas too low: ${facilitatorGas} < ${MIN_FACILITATOR_GAS_BALANCE}`
+          );
+          return {
+            success: false,
+            paymentId,
+            error: 'facilitator_insufficient_gas',
+          };
+        }
+      } catch (error) {
+        console.warn('Facilitator gas check failed:', error);
+        // Non-fatal: proceed but log warning
       }
 
-      // Get initial FCR status for the response
-      let fcrData: SettleResponse['fcr'];
-      if (this.f3 && this.config.fcr.enabled && tipsetHeight !== undefined) {
-        const status = await this.f3.evaluateConfirmationForTipset(tipsetHeight);
-        fcrData = {
-          level: status.level,
-          instance: status.instance,
-          round: status.round,
-          phase: status.phase !== undefined ? status.phase.toString() : undefined,
+      // Reserve credit
+      await this.risk.reserveCredit(paymentId, payment, requirements);
+
+      // Track if bond was committed for rollback
+      let bondCommitted = false;
+
+      // Commit bond if bond service is available
+      if (this.bond) {
+        try {
+          const hasCapacity = await this.bond.hasCapacity(BigInt(payment.value));
+          if (!hasCapacity) {
+            // Release credit since we're failing early
+            await this.risk.releaseCredit(paymentId, false);
+            return {
+              success: false,
+              paymentId,
+              error: 'insufficient_bond_capacity',
+            };
+          }
+          await this.bond.commitPayment(paymentId, requirements.payTo, BigInt(payment.value));
+          bondCommitted = true;
+        } catch (error) {
+          // Release credit since we're failing early
+          await this.risk.releaseCredit(paymentId, false);
+          return {
+            success: false,
+            paymentId,
+            error: `bond_commit_failed: ${error}`,
+          };
+        }
+      }
+
+      // Submit transaction to chain
+      try {
+        const txCid = await this.lotus.submitTransferWithAuthorization(
+          payment.from,
+          payment.to,
+          payment.value,
+          payment.validAfter,
+          payment.validBefore,
+          payment.nonce,
+          payment.signature
+        );
+
+        // Capture current block height as the tipset this payment targets
+        let tipsetHeight: number | undefined;
+        try {
+          tipsetHeight = await this.lotus.getBlockNumber();
+        } catch {
+          // Non-fatal: we just won't have per-payment FCR tracking
+        }
+
+        // Get initial FCR status for the response
+        let fcrData: SettleResponse['fcr'];
+        if (this.f3 && this.config.fcr.enabled && tipsetHeight !== undefined) {
+          const status = await this.f3.evaluateConfirmationForTipset(tipsetHeight);
+          fcrData = {
+            level: status.level,
+            instance: status.instance,
+            round: status.round,
+            phase: status.phase !== undefined ? status.phase.toString() : undefined,
+          };
+        }
+
+        // Update settlement with transaction CID and FCR state
+        await this.risk.updatePendingSettlement(paymentId, {
+          transactionCid: txCid,
+          status: 'submitted',
+          attempts: 1,
+          tipsetHeight,
+          confirmationLevel: fcrData?.level,
+          f3Instance: fcrData?.instance,
+        });
+
+        return {
+          success: true,
+          paymentId,
+          transactionCid: txCid,
+          fcr: fcrData,
+        };
+      } catch (error) {
+        // CRITICAL: Release bond if submission fails
+        if (bondCommitted && this.bond) {
+          try {
+            await this.bond.releasePayment(paymentId);
+            console.log(`Bond released after submission failure: ${paymentId}`);
+          } catch (bondErr) {
+            console.error(`Failed to release bond after submission failure: ${bondErr}`);
+          }
+        }
+
+        // Mark as retry for background processing
+        await this.risk.updatePendingSettlement(paymentId, {
+          status: 'retry',
+          attempts: 1,
+          error: String(error),
+        });
+
+        return {
+          success: false,
+          paymentId,
+          error: `submission_failed: ${error}`,
         };
       }
-
-      // Update settlement with transaction CID and FCR state
-      await this.risk.updatePendingSettlement(paymentId, {
-        transactionCid: txCid,
-        status: 'submitted',
-        attempts: 1,
-        tipsetHeight,
-        confirmationLevel: fcrData?.level,
-        f3Instance: fcrData?.instance,
-      });
-
-      return {
-        success: true,
-        paymentId,
-        transactionCid: txCid,
-        fcr: fcrData,
-      };
-    } catch (error) {
-      // Mark as retry for background processing
-      await this.risk.updatePendingSettlement(paymentId, {
-        status: 'retry',
-        attempts: 1,
-        error: String(error),
-      });
-
-      return {
-        success: false,
-        paymentId,
-        error: `submission_failed: ${error}`,
-      };
+    } finally {
+      // Always release the nonce lock
+      await this.releaseNonceLock(payment);
     }
   }
 
