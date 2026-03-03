@@ -88,26 +88,14 @@ Everything else is pre-configured for Calibration testnet:
 
 ### 3. Deploy contracts (optional)
 
-Contracts are already deployed to Calibration. If you need to redeploy:
+Contracts are already deployed to Calibration (see [Deployed Contracts](#deployed-contracts)). If you need to redeploy:
 
 ```bash
 cd contracts
 npx hardhat run scripts/deploy.ts --network calibration
 ```
 
-Then update `.env` with the new addresses:
-
-```env
-BOND_CONTRACT_ADDRESS=0x...
-ESCROW_CONTRACT_ADDRESS=0x...
-```
-
-Current deployments:
-- BondedFacilitator: `0x0C79179E91246998A7F3b372de69ba2a112a37ed`
-- DeferredPaymentEscrow: `0x3EE8f61b928295492886C6509D591da132531ef3`
-- ERC8004 IdentityRegistry: `0x8A30335A7eff4450671E6aE412Fc786001ce149c`
-- ERC8004 ReputationRegistry: `0x0510a352722D504767A86B961a493BBB3208a9a5`
-- ERC8004 ValidationRegistry: `0x151EC586050d500e423f352A8EE6d781F7c7bE9E`
+Then update `.env` with the new addresses.
 
 ### 4. Start the facilitator
 
@@ -280,98 +268,75 @@ Filecoin's Fast Confirmation Rule using F3/GossiPBFT consensus:
 
 | Level | Meaning | Safety |
 |-------|---------|--------|
-| L0 | Transaction submitted | No confirmation |
-| L1 | Included in tipset | Basic inclusion |
-| L2 | F3 instance started covering the epoch | Consensus in progress |
-| L3 | F3 finalized the epoch | Final, irreversible |
-| LB | 900+ epochs deep | Legacy Filecoin finality |
+| L0 | Transaction submitted to mempool | No confirmation |
+| L1 | Included in tipset | Basic inclusion (~30s) |
+| L2 | COMMIT phase reached or PREPARE+R0+5s heuristic met | High confidence (~45s) |
+| L3 | F3 certificate issued | Final, irreversible (~60s) |
 
 ## Configuration Reference
+
+### Server & Chain
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `PORT` | `3402` | Server port |
-| `LOTUS_ENDPOINT` | Glif Calibration | Filecoin JSON-RPC endpoint |
-| `TOKEN_ADDRESS` | USDFC Calibration | ERC-20 token contract address |
-| `TOKEN_DECIMALS` | `18` | Token decimal places |
-| `TOKEN_NAME` | `USD for Filecoin Community` | EIP-712 domain name (must match contract) |
-| `CHAIN_ID` | `314159` | Filecoin chain ID (314159=Calibration, 314=Mainnet) |
-| `FACILITATOR_PRIVATE_KEY` | — | Wallet private key for submitting transactions |
+| `CHAIN_ID` | `314159` | Chain ID (314159=Calibration, 314=Mainnet) |
+| `LOTUS_ENDPOINT` | Glif Calibration | JSON-RPC endpoint |
+| `FACILITATOR_PRIVATE_KEY` | — | Wallet private key for transactions |
 | `FACILITATOR_ADDRESS` | — | Wallet address |
-| `BOND_CONTRACT_ADDRESS` | — | BondedFacilitator contract (optional, enables bond) |
-| `ESCROW_CONTRACT_ADDRESS` | — | DeferredPaymentEscrow contract (optional, enables deferred) |
+
+### Token
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `TOKEN_ADDRESS` | USDFC Calibration | ERC-20 token contract |
+| `TOKEN_DECIMALS` | `18` | Token decimal places |
+| `TOKEN_NAME` | `USD for Filecoin Community` | EIP-712 domain name |
+
+### Risk Limits
+
+| Variable | Default | Description |
+|----------|---------|-------------|
 | `RISK_MAX_PER_TX` | `100` | Max USD per transaction |
 | `RISK_MAX_PENDING` | `50` | Max USD pending per wallet |
 | `RISK_DAILY_LIMIT` | `500` | Max USD per wallet per day |
 | `FCR_ENABLED` | `true` | Enable F3 monitoring |
-| `REDIS_ENABLED` | `false` | Enable Redis persistence (recommended for production) |
-| `REDIS_HOST` | `localhost` | Redis server host |
-| `REDIS_PORT` | `6379` | Redis server port |
-| `REDIS_PASSWORD` | — | Redis password (optional) |
-| `REDIS_DB` | `0` | Redis database index |
-| `REDIS_KEY_PREFIX` | `fcr-x402:` | Key prefix for namespacing |
-| `ERC8004_IDENTITY_REGISTRY` | — | ERC-8004 Identity registry contract address |
-| `ERC8004_REPUTATION_REGISTRY` | — | ERC-8004 Reputation registry contract address |
-| `ERC8004_VALIDATION_REGISTRY` | — | ERC-8004 Validation registry contract address |
-| `ERC8004_AGENT_ID` | — | Registered agent ID (set after registration) |
+
+### Contracts (Optional)
+
+| Variable | Description |
+|----------|-------------|
+| `BOND_CONTRACT_ADDRESS` | BondedFacilitator contract |
+| `ESCROW_CONTRACT_ADDRESS` | DeferredPaymentEscrow contract |
+| `ERC8004_IDENTITY_REGISTRY` | ERC-8004 Identity registry |
+| `ERC8004_REPUTATION_REGISTRY` | ERC-8004 Reputation registry |
+| `ERC8004_VALIDATION_REGISTRY` | ERC-8004 Validation registry |
+| `ERC8004_AGENT_ID` | Registered agent ID |
+
+### Redis (Optional)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `REDIS_ENABLED` | `false` | Enable persistence (recommended for production) |
+| `REDIS_HOST` | `localhost` | Server host |
+| `REDIS_PORT` | `6379` | Server port |
+| `REDIS_PASSWORD` | — | Password |
+| `REDIS_DB` | `0` | Database index |
+| `REDIS_KEY_PREFIX` | `fcr-x402:` | Key prefix |
 
 ## Project Structure
 
 ```
 FIL-x402/
-  demo/                               Next.js demo frontend
-    src/app/
-      buyer/page.tsx                  Payment signing + FCR tracking
-      provider/page.tsx               Integration guide
-      dashboard/page.tsx              Facilitator monitoring
-      agent/page.tsx                  ERC-8004 agent identity viewer
-    src/lib/
-      config.ts                       Chain/contract configuration
-      facilitator.ts                  API client
-  contracts/                          Hardhat project (Solidity)
-    contracts/
-      BondedFacilitator.sol           Bond collateral contract
-      DeferredPaymentEscrow.sol       Escrow + EIP-712 voucher contract
-      interfaces/                     Contract interfaces
-      mocks/MockERC20.sol             Test token
-    lib/erc8004-contracts/            ERC-8004 registry contracts (submodule)
-    test/                             Contract tests (33 tests)
-    scripts/deploy.ts                 Calibration deployment script
-  facilitator/                        TypeScript service (Hono)
-    src/
-      index.ts                        Entry point, server, config
-      types/
-        config.ts                     Zod-validated configuration
-        payment.ts                    EIP-3009 payload, requirements
-        f3.ts                         F3 phases, confirmation levels
-        bond.ts                       Bond config, payment status
-        deferred.ts                   Voucher schema, escrow account
-        policy.ts                     Provider policy interfaces
-      services/
-        lotus.ts                      Filecoin RPC client
-        signature.ts                  EIP-712 / EIP-3009 verification
-        verify.ts                     Payment verification pipeline
-        risk.ts                       Tiered risk tracking
-        settle.ts                     Settlement + bond integration
-        f3.ts                         F3 monitor, L2 heuristic
-        bond.ts                       Bond contract wrapper
-        deferred.ts                   Escrow + voucher management
-        fee.ts                        Fee calculation
-        policy.ts                     Provider policy engine
-        redis.ts                      Redis persistence + distributed locking
-        erc8004.ts                    ERC-8004 agent identity service
-      routes/
-        verify.ts                     POST /verify
-        settle.ts                     POST /settle, GET /settle/:id
-        health.ts                     GET /health
-        fcr.ts                        GET /fcr/*
-        deferred.ts                   GET/POST /deferred/*
-        agent.ts                      GET /agent/*, /.well-known/*
-      __tests__/                      Test suite (60 tests)
-    scripts/
-      test-payment.ts                 x402 payment flow test
-      test-stage3.ts                  Bond + escrow integration test
-      register-agent.ts               ERC-8004 agent registration
+├── facilitator/          TypeScript payment service (Hono)
+│   ├── src/services/     Core services (verify, settle, risk, f3, bond)
+│   ├── src/routes/       API endpoints
+│   └── src/__tests__/    Test suite (60 tests)
+├── contracts/            Solidity smart contracts (Hardhat)
+│   ├── contracts/        BondedFacilitator, DeferredPaymentEscrow
+│   └── lib/erc8004-contracts/  ERC-8004 registries (submodule)
+└── demo/                 Next.js frontend
+    └── src/app/          Buyer, Provider, Dashboard, Agent pages
 ```
 
 ## Known Limitations
@@ -383,42 +348,48 @@ FIL-x402/
 
 ## Mainnet Configuration
 
-When deploying to Filecoin Mainnet, update these settings:
+When deploying to Filecoin Mainnet:
 
-| Setting | Calibration (Testnet) | Mainnet |
-|---------|----------------------|---------|
+| Setting | Calibration | Mainnet |
+|---------|-------------|---------|
 | `CHAIN_ID` | `314159` | `314` |
-| `LOTUS_ENDPOINT` | `https://api.calibration.node.glif.io/rpc/v1` | `https://api.node.glif.io/rpc/v1` |
-| `TOKEN_ADDRESS` | `0xb3042734b608a1B16e9e86B374A3f3e389B4cDf0` | TBD (mainnet USDFC) |
-| `BOND_CONTRACT_ADDRESS` | `0x0C79179E91246998A7F3b372de69ba2a112a37ed` | Redeploy required |
-| `ESCROW_CONTRACT_ADDRESS` | `0x3EE8f61b928295492886C6509D591da132531ef3` | Redeploy required |
-| `ERC8004_IDENTITY_REGISTRY` | `0x8A30335A7eff4450671E6aE412Fc786001ce149c` | Redeploy required |
-| `ERC8004_REPUTATION_REGISTRY` | `0x0510a352722D504767A86B961a493BBB3208a9a5` | Redeploy required |
-| `ERC8004_VALIDATION_REGISTRY` | `0x151EC586050d500e423f352A8EE6d781F7c7bE9E` | Redeploy required |
+| `LOTUS_ENDPOINT` | `api.calibration.node.glif.io` | `api.node.glif.io` |
+| `TOKEN_ADDRESS` | See [Deployed Contracts](#deployed-contracts) | Mainnet USDFC |
+| Contracts | See [Deployed Contracts](#deployed-contracts) | Redeploy required |
 
-**Additional mainnet requirements:**
+**Additional requirements:**
+
 - Enable Redis persistence (`REDIS_ENABLED=true`)
 - Use HSM or multi-sig for facilitator key
 - Deploy contracts with audited code
 - Configure monitoring and alerting
 
+## Deployed Contracts
+
+Calibration testnet (`chainId: 314159`):
+
+| Contract | Address |
+|----------|---------|
+| BondedFacilitator | `0x0C79179E91246998A7F3b372de69ba2a112a37ed` |
+| DeferredPaymentEscrow | `0x3EE8f61b928295492886C6509D591da132531ef3` |
+| ERC-8004 IdentityRegistry | `0x8A30335A7eff4450671E6aE412Fc786001ce149c` |
+| ERC-8004 ReputationRegistry | `0x0510a352722D504767A86B961a493BBB3208a9a5` |
+| ERC-8004 ValidationRegistry | `0x151EC586050d500e423f352A8EE6d781F7c7bE9E` |
+
 ## Roadmap
 
 | Stage | Description | Status |
 |-------|-------------|--------|
-| 1 | PoC — Core x402 protocol, EIP-3009 settlement | Complete |
+| 1 | Core x402 protocol, EIP-3009 settlement | Complete |
 | 2 | FCR Integration — F3 finality monitoring, L0-L3 levels | Complete |
 | 3 | Bond + Deferred — Collateral contracts, escrow vouchers, risk tiers | Complete |
-| 4 | Production Hardening — Persistence, key management, monitoring, audit | Planned |
-| 5 | ERC-8004 Trustless Agents — Discovery, reputation, validation registries | In Progress |
-| 6 | Ecosystem Integration — Secured Finance partnership, x402 Foundation, storage provider onboarding | Planned |
+| 4 | Production Hardening — Persistence, key management, monitoring | Planned |
+| 5 | ERC-8004 Trustless Agents — Discovery, reputation, validation | Complete |
+| 6 | Ecosystem Integration — x402 Foundation, storage provider onboarding | Planned |
 
-## Docs
+## Documentation
 
 - [Technical Spec](./fcr-x402-spec.md) — FCR confirmation model, F3 heuristics, bond design
-- [Implementation Roadmap](./plan.md) — 6-stage plan (Stages 1-3 complete)
-- [API Reference](./facilitator/docs/api.md) — Endpoint details
-- [Risk Model](./facilitator/docs/risk.md) — Risk management details
 
 ## License
 

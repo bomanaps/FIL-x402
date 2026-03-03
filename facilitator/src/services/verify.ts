@@ -9,16 +9,18 @@ import { SignatureService } from './signature.js';
 import { RiskService } from './risk.js';
 
 export class VerifyService {
+  private config: Config;
   private lotus: LotusService;
   private signature: SignatureService;
   private risk: RiskService;
 
   constructor(
-    _config: Config,
+    config: Config,
     lotus: LotusService,
     signature: SignatureService,
     risk: RiskService
   ) {
+    this.config = config;
     this.lotus = lotus;
     this.signature = signature;
     this.risk = risk;
@@ -32,12 +34,21 @@ export class VerifyService {
     payment: PaymentPayload,
     requirements: PaymentRequirements
   ): Promise<VerifyResponse> {
-    // 1. Basic validation - token and chain match
+    // 1. Basic validation - token, chain, and recipient match
     if (payment.token.toLowerCase() !== requirements.tokenAddress.toLowerCase()) {
       return {
         valid: false,
         riskScore: 100,
         reason: 'token_mismatch',
+      };
+    }
+
+    // Chain ID validation - prevent cross-chain replay attacks
+    if (requirements.chainId !== this.config.chain.id) {
+      return {
+        valid: false,
+        riskScore: 100,
+        reason: 'chain_id_mismatch',
       };
     }
 

@@ -169,7 +169,7 @@ function createApp(config: Config, redis?: RedisService) {
     }
   }
 
-  const settle = new SettleService(config, lotus, signature, risk, verify, f3, bond);
+  const settle = new SettleService(config, lotus, signature, risk, verify, f3, bond, redis);
 
   // Create Hono app
   const app = new Hono();
