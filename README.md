@@ -2,7 +2,7 @@
 
 Instant payments on Filecoin using the x402 HTTP payment protocol and Fast Confirmation Rule (FCR).
 
-[Video Walkthrough](https://youtu.be/IgoX2aImy0s?si=_xdYRbNPlrjWWmmE) | [Technical Docs](./filx402docs.md) | [Technical Spec](./fcr-x402-spec.md)
+[Video Walkthrough](https://youtu.be/IgoX2aImy0s?si=_xdYRbNPlrjWWmmE) | [Technical Docs](./filx402docs.md) | [Technical Spec](./fcr-x402-spec.md) | [Contributing](./CONTRIBUTING.md)
 
 ## What is FCR-x402
 
@@ -45,6 +45,10 @@ npm run dev
 Server starts at `http://localhost:3402`.
 
 For full setup, contract deployment, demo frontend, and test instructions see the [Technical Docs](./filx402docs.md).
+
+## Contributing
+
+Contributions are welcome. See [CONTRIBUTING.md](./CONTRIBUTING.md) for environment setup, code standards, testing requirements, and the pull request process.
 
 ## Getting Help
 
