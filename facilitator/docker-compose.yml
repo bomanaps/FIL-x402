@@ -1,0 +1,97 @@
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - fcr-x402-net
+
+  facilitator:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3402:3402"
+    environment:
+      # Server
+      PORT: '3402'
+      HOST: '0.0.0.0'
+
+      # Redis
+      REDIS_ENABLED: 'true'
+      REDIS_HOST: 'redis'
+      REDIS_PORT: '6379'
+      REDIS_DB: '0'
+      REDIS_KEY_PREFIX: 'fcr-x402:'
+      REDIS_MAX_RETRIES: '3'
+      REDIS_RETRY_DELAY_MS: '1000'
+
+      # Lotus Node
+      LOTUS_ENDPOINT: '${LOTUS_ENDPOINT:-https://api.calibration.node.glif.io/rpc/v1}'
+      LOTUS_TOKEN: '${LOTUS_TOKEN:-}'
+
+      # Token
+      TOKEN_ADDRESS: '${TOKEN_ADDRESS:-0xb3042734b608a1B16e9e86B374A3f3e389B4cDf0}'
+      TOKEN_DECIMALS: '${TOKEN_DECIMALS:-18}'
+      TOKEN_NAME: '${TOKEN_NAME:-USD for Filecoin Community}'
+
+      # Chain
+      CHAIN_ID: '${CHAIN_ID:-314159}'
+      CHAIN_NAME: '${CHAIN_NAME:-calibration}'
+
+      # Risk Limits
+      RISK_MAX_PER_TX: '${RISK_MAX_PER_TX:-100}'
+      RISK_MAX_PENDING: '${RISK_MAX_PENDING:-50}'
+      RISK_DAILY_LIMIT: '${RISK_DAILY_LIMIT:-500}'
+
+      # Settlement
+      SETTLEMENT_MAX_ATTEMPTS: '${SETTLEMENT_MAX_ATTEMPTS:-3}'
+      SETTLEMENT_RETRY_DELAY_MS: '${SETTLEMENT_RETRY_DELAY_MS:-5000}'
+      SETTLEMENT_TIMEOUT_MS: '${SETTLEMENT_TIMEOUT_MS:-300000}'
+
+      # FCR
+      FCR_ENABLED: '${FCR_ENABLED:-true}'
+      FCR_POLL_INTERVAL_MS: '${FCR_POLL_INTERVAL_MS:-1000}'
+      FCR_MIN_TIME_IN_PREPARE_MS: '${FCR_MIN_TIME_IN_PREPARE_MS:-5000}'
+      FCR_CONFIRMATION_TIMEOUT_MS: '${FCR_CONFIRMATION_TIMEOUT_MS:-120000}'
+
+      # Facilitator Wallet — required, must be set in .env
+      FACILITATOR_PRIVATE_KEY: '${FACILITATOR_PRIVATE_KEY}'
+      FACILITATOR_ADDRESS: '${FACILITATOR_ADDRESS}'
+
+      # Stage 3: Bond + Deferred (optional)
+      BOND_CONTRACT_ADDRESS: '${BOND_CONTRACT_ADDRESS:-}'
+      BOND_ALERT_THRESHOLD: '${BOND_ALERT_THRESHOLD:-80}'
+      ESCROW_CONTRACT_ADDRESS: '${ESCROW_CONTRACT_ADDRESS:-}'
+
+      # Stage 5: ERC-8004 (optional)
+      ERC8004_IDENTITY_REGISTRY: '${ERC8004_IDENTITY_REGISTRY:-}'
+      ERC8004_REPUTATION_REGISTRY: '${ERC8004_REPUTATION_REGISTRY:-}'
+      ERC8004_VALIDATION_REGISTRY: '${ERC8004_VALIDATION_REGISTRY:-}'
+      ERC8004_AGENT_ID: '${ERC8004_AGENT_ID:-}'
+
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - fcr-x402-net
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3402/health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 10s
+      retries: 3
+
+volumes:
+  redis-data:
+
+networks:
+  fcr-x402-net:
+    driver: bridge
