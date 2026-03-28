@@ -7,6 +7,7 @@ import type {
 import { LotusService } from './lotus.js';
 import { SignatureService } from './signature.js';
 import { RiskService } from './risk.js';
+import { metrics } from './metrics.js';
 
 export class VerifyService {
   private config: Config;
@@ -31,6 +32,18 @@ export class VerifyService {
    * Performs all checks needed before accepting a payment
    */
   async verify(
+    payment: PaymentPayload,
+    requirements: PaymentRequirements
+  ): Promise<VerifyResponse> {
+    const result = await this._verify(payment, requirements);
+    metrics.verifyTotal.inc({
+      result: result.valid ? 'valid' : 'invalid',
+      reason: result.reason ?? 'none',
+    });
+    return result;
+  }
+
+  private async _verify(
     payment: PaymentPayload,
     requirements: PaymentRequirements
   ): Promise<VerifyResponse> {

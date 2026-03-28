@@ -9,6 +9,7 @@ import {
   type F3InstanceState,
   type ConfirmationStatus,
 } from '../types/f3.js';
+import { metrics } from './metrics.js';
 
 
 /**
@@ -274,6 +275,8 @@ export class F3Service {
         phaseStartTime: now,
         roundBumps: 0,
       };
+      metrics.f3Instance.set(progress.ID);
+      metrics.f3Round.set(progress.Round);
 
       // New instance means previous one finalized - fetch certificate
       if (prev) {
@@ -291,6 +294,8 @@ export class F3Service {
         phaseStartTime: now,
         roundBumps: prev.roundBumps + 1,
       };
+      metrics.f3Round.set(progress.Round);
+      metrics.f3RoundBumps.inc();
 
       if (prev.roundBumps > 0) {
         console.warn(`F3 round bump detected: instance=${progress.ID}, round=${progress.Round}, bumps=${prev.roundBumps + 1}`);

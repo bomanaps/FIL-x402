@@ -1,6 +1,7 @@
 import { ethers } from 'ethers';
 import type { Config } from '../types/config.js';
 import type { BondConfig, BondStatus } from '../types/bond.js';
+import { metrics } from './metrics.js';
 
 const BONDED_FACILITATOR_ABI = [
   'function depositBond(uint256 amount) external',
@@ -101,6 +102,10 @@ export class BondService {
         `Bond utilization alert: ${utilizationPercent}% (threshold: ${this.bondConfig.alertThresholdPercent}%)`
       );
     }
+
+    metrics.bondUtilization.set(utilizationPercent);
+    metrics.bondAvailable.set(Number(available));
+    metrics.bondCommitted.set(Number(totalCommitted));
 
     return { totalBond, totalCommitted, available, utilizationPercent };
   }
