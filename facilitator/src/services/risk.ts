@@ -1,6 +1,7 @@
 import type { Config } from '../types/config.js';
 import type { PaymentPayload, PaymentRequirements, PendingSettlement, RiskLimits } from '../types/payment.js';
 import { RedisService, REDIS_KEYS } from './redis.js';
+import { metrics } from './metrics.js';
 
 export interface RiskCheckResult {
   allowed: boolean;
@@ -154,6 +155,15 @@ export class RiskService {
   // ─── Payment Risk Check ─────────────────────────────────────
 
   async checkPayment(payment: PaymentPayload): Promise<RiskCheckResult> {
+    const result = await this._checkPayment(payment);
+    metrics.riskCheckTotal.inc({
+      result: result.allowed ? 'allowed' : 'rejected',
+      reason: result.reason ?? 'none',
+    });
+    return result;
+  }
+
+  private async _checkPayment(payment: PaymentPayload): Promise<RiskCheckResult> {
     const wallet = payment.from.toLowerCase();
     const amount = BigInt(payment.value);
 

@@ -27,6 +27,7 @@ import {
   createFcrRoute,
   createDeferredRoutes,
   createAgentRoute,
+  createMetricsRoute,
 } from './routes/index.js';
 import type { BondConfig } from './types/bond.js';
 import type { DeferredConfig } from './types/deferred.js';
@@ -200,6 +201,7 @@ function createApp(config: Config, redis?: RedisService) {
   app.route('/settle', createSettleRoute(settle));
   app.route('/health', createHealthRoute(config, lotus, risk));
   app.route('/fcr', createFcrRoute(f3));
+  app.route('/metrics', createMetricsRoute());
 
   // Mount deferred routes if enabled
   if (deferred) {
@@ -231,6 +233,7 @@ function createApp(config: Config, redis?: RedisService) {
         settle: '/settle',
         health: '/health',
         fcr: '/fcr/status',
+        metrics: '/metrics',
         ...(deferredConfig.enabled ? {
           deferred_buyers: '/deferred/buyers/:address',
           deferred_vouchers: '/deferred/vouchers',

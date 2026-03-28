@@ -12,6 +12,7 @@ import { VerifyService } from './verify.js';
 import type { F3Service } from './f3.js';
 import type { BondService } from './bond.js';
 import type { RedisService } from './redis.js';
+import { metrics } from './metrics.js';
 
 // Minimum gas balance required for facilitator (0.1 FIL in attoFIL)
 const MIN_FACILITATOR_GAS_BALANCE = BigInt('100000000000000000');
@@ -159,6 +160,7 @@ export class SettleService {
         try {
           const hasCapacity = await this.bond.hasCapacity(BigInt(payment.value));
           if (!hasCapacity) {
+            metrics.bondCommitFailures.inc();
             // Release credit since we're failing early
             await this.risk.releaseCredit(paymentId, false);
             return {
@@ -222,6 +224,7 @@ export class SettleService {
           f3Instance: fcrData?.instance,
         });
 
+        metrics.settleTotal.inc({ status: 'submitted' });
         return {
           success: true,
           paymentId,
@@ -307,6 +310,11 @@ export class SettleService {
       for (const settlement of needsFCR) {
         await this.updateSettlementFCR(settlement);
       }
+
+      // Update pending gauges
+      const stats = await this.risk.getStats();
+      metrics.pendingSettlements.set(stats.totalPendingSettlements);
+      metrics.pendingAmountUsd.set(Number(stats.totalPendingAmount));
     } finally {
       this.isProcessing = false;
     }
@@ -330,6 +338,10 @@ export class SettleService {
 
       // Only update if the level has advanced
       if (status.level !== settlement.confirmationLevel) {
+        metrics.confirmationLatency.observe(
+          { level: status.level },
+          (Date.now() - settlement.createdAt) / 1000
+        );
         const updates: Partial<PendingSettlement> = {
           confirmationLevel: status.level,
           f3Instance: status.instance,
@@ -373,6 +385,8 @@ export class SettleService {
             }
           }
           await this.risk.releaseCredit(paymentId, true);
+          metrics.settleTotal.inc({ status: 'confirmed' });
+          metrics.settleDuration.observe((Date.now() - settlement.createdAt) / 1000);
           console.log(`Settlement ${paymentId} confirmed: ${transactionCid}`);
           return;
         } else if (receipt && receipt.status === 0) {
@@ -394,6 +408,7 @@ export class SettleService {
       if (attempts >= maxAttempts) {
         // Max retries reached - mark as failed
         await this.risk.releaseCredit(paymentId, false);
+        metrics.settleTotal.inc({ status: 'failed' });
         console.error(`Settlement ${paymentId} failed after ${attempts} attempts`);
         return;
       }
@@ -424,6 +439,7 @@ export class SettleService {
           attempts: attempts + 1,
         });
 
+        metrics.settleRetries.inc();
         console.log(`Settlement ${paymentId} retry ${attempts + 1} submitted: ${txCid}`);
       } catch (error) {
         await this.risk.updatePendingSettlement(paymentId, {

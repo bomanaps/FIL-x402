@@ -4,3 +4,4 @@ export { createHealthRoute } from './health.js';
 export { createFcrRoute } from './fcr.js';
 export { createDeferredRoutes } from './deferred.js';
 export { createAgentRoute } from './agent.js';
+export { createMetricsRoute } from './metrics.js';
